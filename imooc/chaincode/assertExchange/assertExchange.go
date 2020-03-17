@@ -35,21 +35,86 @@ type AssetHistory struct {
 
 // 用户开户
 func userRegister(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 2 {
+		return shim.Error("not enough args")
+	}
+
+	// 套路2: 验证参数的正确性
+	name := args[0]
+	id := args[1]
+	if name == "" || id == "" {
+		return shim.Error("invalid args")
+	}
 	return shim.Success(nil)
 }
 
 // 用户销户
 func userDestroy(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 1 {
+		return shim.Error("not enough args")
+	}
+
+	// 套路2: 验证参数的正确性
+	id := args[0]
+	if id == "" {
+		return shim.Error("invalid args")
+	}
 	return shim.Success(nil)
 }
 
 // 资产登记
 func assetEnroll(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 4 {
+		return shim.Error("not enough args")
+	}
+
+	// 套路2: 验证参数的正确性
+	assetName := args[0]
+	assetId := args[1]
+	metadata := args[2]
+	ownerId := args[3]
+	if assetName == "" || assetId == "" || metadata == "" || ownerId == "" {
+		return shim.Error("invalid args")
+	}
 	return shim.Success(nil)
 }
 
 // 资产转让
 func assetExchange(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 3 {
+		return shim.Error("not enough args")
+	}
+	return shim.Success(nil)
+}
+
+// 用户查询
+func queryUser(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 1 {
+		return shim.Error("not enough args")
+	}
+	return shim.Success(nil)
+}
+
+// 资产查询
+func queryAsset(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 1 {
+		return shim.Error("not enough args")
+	}
+	return shim.Success(nil)
+}
+
+// 资产变更历史查询
+func queryAssetHistory(args []string) pb.Response {
+	// 套路1: 检查参数的个数
+	if len(args) != 2 && len(args) != 1 {
+		return shim.Error("not enough args")
+	}
 	return shim.Success(nil)
 }
 
@@ -65,6 +130,12 @@ func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 		return assetEnroll(args)
 	case "assetExchange":
 		return assetExchange(args)
+	case "queryUser":
+		return queryUser(args)
+	case "queryAssert":
+		return queryAsset(args)
+	case "queryAssetHistory":
+		return queryAssetHistory(args)
 	}
 
 	return shim.Success(nil)
