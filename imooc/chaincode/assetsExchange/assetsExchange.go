@@ -55,10 +55,6 @@ func constructAssetKey(assetId string) string {
 	return fmt.Sprintf("asset_%s", assetId)
 }
 
-func constructAssetHistoryKey(originUserId, assetId, currentUserId string) string {
-	return fmt.Sprintf("history_%s_%s_%s", originUserId, assetId, currentUserId)
-}
-
 // 用户开户
 // 验证的步骤需要读取状态数据库，所以需要把SDK加进来
 func userRegister(stub shim.ChaincodeStubInterface, args []string) pb.Response {
@@ -91,7 +87,7 @@ func userRegister(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	}
 
 	// 序列化对象
-	userBytes, err := json.Marshal(user)
+	userBytes, err = json.Marshal(user)
 	if err != nil {
 		return shim.Error(fmt.Sprintf("marshal user error %s", err))
 	}
@@ -220,7 +216,17 @@ func assetEnroll(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	if err != nil {
 		return shim.Error(fmt.Sprintf("marshal asset history error: %s", err))
 	}
-	if err := stub.PutState(constructAssetHistoryKey(originOwner, assetId, ownerId), historyBytes); err != nil {
+
+	historyKey, err := stub.CreateCompositeKey("history", []string{
+		assetId,
+		originOwner,
+		ownerId,
+	})
+	if err != nil {
+		return shim.Error(fmt.Sprintf("create key error: %s", err))
+	}
+
+	if err := stub.PutState(historyKey, historyBytes); err != nil {
 		return shim.Error(fmt.Sprintf("save asset history error"))
 	}
 
@@ -322,7 +328,13 @@ func assetExchange(stub shim.ChaincodeStubInterface, args []string) pb.Response 
 	if err != nil {
 		return shim.Error(fmt.Sprintf("marshal asset history error: %s", err))
 	}
-	if err := stub.PutState(constructAssetHistoryKey(ownerId, assetId, currentOwnerId), historyBytes); err != nil {
+
+	historyKey, err := stub.CreateCompositeKey("history", []string{
+		assetId,
+		ownerId,
+		currentOwnerId,
+	})
+	if err := stub.PutState(historyKey, historyBytes); err != nil {
 		return shim.Error(fmt.Sprintf("save asset history error"))
 	}
 
@@ -387,7 +399,50 @@ func queryAssetHistory(stub shim.ChaincodeStubInterface, args []string) pb.Respo
 	if err != nil || len(assetBytes) == 0 {
 		return shim.Error("asset not found")
 	}
-	return shim.Success(nil)
+
+	// 查询相关数据
+	keys := make([]string, 0)
+	keys = append(keys, assetId)
+	switch queryType {
+	case "enroll":
+		keys = append(keys, assetId)
+	case "exchange", "all": // 不添加任何附件key,如果是这两种情况,要不所有的key查出来，把不属于这种的情况排除
+
+	default:
+		return shim.Error(fmt.Sprintf("unsupport queryType: %s", queryType))
+	}
+	result, err := stub.GetStateByPartialCompositeKey("history", keys)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("query history error: %s", err))
+	}
+	defer result.Close()
+
+	histories := make([]*AssetHistory, 0)
+	for result.HasNext() {
+		historyVal, err := result.Next()
+		if err != nil {
+			return shim.Error(fmt.Sprintf("query error: %s", err))
+		}
+
+		history := new(AssetHistory)
+		if err := json.Unmarshal(historyVal.GetValue(), history); err != nil {
+			return shim.Error(fmt.Sprintf("unmarshal error: %s", err))
+		}
+
+		// 过滤掉不是资产转让的记录
+		if queryType == "exchange" && history.OriginOwnerId == originOwner {
+			continue
+		}
+
+		histories = append(histories, history)
+	}
+
+	historiesBytes, err := json.Marshal(histories)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("marshal error: %s", err))
+	}
+	// 查询资产变更
+	return shim.Success(historiesBytes)
 }
 
 func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
@@ -395,22 +450,22 @@ func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 
 	switch funcName {
 	case "userRegister":
-		return userRegister(args)
+		return userRegister(stub, args)
 	case "userDestroy":
-		return userDestroy(args)
+		return userDestroy(stub, args)
 	case "assetEnroll":
-		return assetEnroll(args)
+		return assetEnroll(stub, args)
 	case "assetExchange":
-		return assetExchange(args)
+		return assetExchange(stub, args)
 	case "queryUser":
-		return queryUser(args)
+		return queryUser(stub, args)
 	case "queryAssert":
-		return queryAsset(args)
+		return queryAsset(stub, args)
 	case "queryAssetHistory":
-		return queryAssetHistory(args)
+		return queryAssetHistory(stub, args)
+	default:
+		return shim.Error(fmt.Sprintf("unsupport function: %s", funcName))
 	}
-
-	return shim.Success(nil)
 }
 
 func main() {
