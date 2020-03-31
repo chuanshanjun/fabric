@@ -1,0 +1,86 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# ---------------------------------------------------------------------------
+# "OrdererOrgs" - Definition of organizations managing orderer nodes
+# "OrdererOrgs" - 定义管理排序节点的组织
+# ---------------------------------------------------------------------------
+OrdererOrgs:
+  # ---------------------------------------------------------------------------
+  # Orderer
+  # ---------------------------------------------------------------------------
+  - Name: Orderer # 组织的名字
+    Domain: imocc.com # 域名
+    Specs: # 定义组织的节点信息
+      - Hostname: orderer # 单个orderer(solo)，节点域名：orderer.imocc.com
+      # - Hostname: orderer1 基于kafka模式可以配置多个order
+# ---------------------------------------------------------------------------
+# "PeerOrgs" - Definition of organizations managing peer nodes
+# "PeerOrgs" - 定义管理peer节点的组织
+# ---------------------------------------------------------------------------
+PeerOrgs:
+  # ---------------------------------------------------------------------------
+  # Org0 组织0
+  # ---------------------------------------------------------------------------
+  - Name: Org0
+    Domain: org0.imocc.com
+    # ---------------------------------------------------------------------------
+    # "Specs"
+    # ---------------------------------------------------------------------------
+    # Uncomment this section to enable the explicit definition of hosts in your
+    # configuration.  Most users will want to use Template, below
+    #
+    # Specs is an array of Spec entries.  Each Spec entry consists of two fields:
+    #   - Hostname:   (Required) The desired hostname, sans the domain.
+    #   - CommonName: (Optional) Specifies the template or explicit override for
+    #                 the CN.  By default, this is the template:
+    #
+    #                              "{{.Hostname}}.{{.Domain}}"
+    #
+    #                 which obtains its values from the Spec.Hostname and
+    #                 Org.Domain, respectively.
+    # ---------------------------------------------------------------------------
+    # Specs:
+    #   - Hostname: foo # implicitly "foo.org1.example.com"
+    #     CommonName: foo27.org5.example.com # overrides Hostname-based FQDN set above
+    #   - Hostname: bar
+    #   - Hostname: baz
+    # ---------------------------------------------------------------------------
+    # "Template"
+    # ---------------------------------------------------------------------------
+    # Allows for the definition of 1 or more hosts that are created sequentially
+    # from a template. By default, this looks like "peer%d" from 0 to Count-1.
+    # You may override the number of nodes (Count), the starting index (Start)
+    # or the template used to construct the name (Hostname).
+    #
+    # Note: Template and Specs are not mutually exclusive.  You may define both
+    # sections and the aggregate nodes will be created for you.  Take care with
+    # name collisions
+    # ---------------------------------------------------------------------------
+    Template: # 使用模板定义peer节点(peer组织的节点可能不只一个，会有多个，多个specs会写多个，使用template比较简化)
+      Count: 2 # peer0.org0.imocc.com & peer1.org0.imocc.com 此处我们定义了两个peer节点，所以他们的hostname经过拼装会有两个(peer+组织域名,peer1+组织域名)
+      # Start: 5 index计数的起始 计数的时候从0开始还是从我们定义的start(5)开始，主要用于我们一开始定义的两个节点，但是后面可能因为业务的增加而不够用，我们可以在这里改变index的启示状态
+      # Hostname: {{.Prefix}}{{.Index}} # default
+    # ---------------------------------------------------------------------------
+    # "Users"
+    # ---------------------------------------------------------------------------
+    # Count: The number of user accounts _in addition_ to Admin
+    # ---------------------------------------------------------------------------
+    Users: # 组织的用户信息 定义组织有多少个用户
+      Count: 2 # Admin & User1 & User2 此用户指除了admin以外的其他用户，此处配2会生成3个admin user1&user2,admin是内置自动生成的
+  # ---------------------------------------------------------------------------
+  # Org1 组织1
+  # ---------------------------------------------------------------------------
+  - Name: Org1
+    Domain: org1.imocc.com
+    Specs: # 组织1又用了specs又用了template，最终达到生成三个peer,peer0,peer1,peer2
+      - Hostname: peer0
+        #CommonName: cpeer0.org1.imocc.com
+      - Hostname: peer1
+    Template:
+      Count: 1
+      Start: 2
+    Users:
+      Count: 3 # Admin & User1 & User2 & User3 生成4个用户(包括admin user1 user2 user3)

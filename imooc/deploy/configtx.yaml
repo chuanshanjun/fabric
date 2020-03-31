@@ -1,0 +1,155 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+---
+################################################################################
+#
+#   Profile
+#
+#   - Different configuration profiles may be encoded here to be specified
+#   as parameters to the configtxgen tool
+#
+################################################################################
+Profiles: # 联盟配置 (在联盟内的组织才能够对区块链进行一些操作)
+    # 此时有个org2要去操作联盟内的内容，但是它没包含在这个联盟中，那么他就是没有权限的
+    # 一般我们至少包含两个联盟配置，第一个联盟配置针对的是系统链，也就是全局的组织信息
+    OneOrgOrdererGenesis: # 系统链 全局组织信息(第一个联盟，包含了我们刚才定义的三个组织)
+        Orderer:
+            <<: *OrdererDefaults
+            Organizations:
+                - *OrdererOrg
+        Consortiums:
+            SampleConsortium:
+                Organizations:
+                    - *Org0
+                    - *Org1
+    # 该配置针对是我们的业务链，业务相关联盟里面包含的组织，可能是我们定义的所有组织中的的子集
+    # 如果某个组织没有包含到这个链中，那么在这个联盟下建立的链也是无法去参与的
+    TwoOrgChannel: # 业务相关的联盟
+        Consortium: SampleConsortium
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+                - *Org0
+                - *Org1
+
+################################################################################
+#
+#   Section: Organizations
+#
+#   - This section defines the different organizational identities which will
+#   be referenced later in the configuration.
+#
+################################################################################
+Organizations:
+    # 组织相关的配置，这是我们刚才生成的三个组织，三个组织的定义都一样
+    # 只是针对peer节点，他有一个主节点的配置(锚节点)
+    - # 如org0,org1都是一个peer节点
+    # SampleOrg defines an MSP using the sampleconfig.  It should never be used
+    # in production but may be used as a template for other definitions
+    - &OrdererOrg
+        # DefaultOrg defines the organization which is used in the sampleconfig
+        # of the fabric.git development environment
+        Name: OrdererOrg #组织的名字
+
+        # ID to load the MSP definition as
+        ID: OrdererMSP #组织的ID
+
+        # MSPDir is the filesystem path which contains the MSP configuration
+        MSPDir: crypto-config/ordererOrganizations/imocc.com/msp #组织所在位置,这个相对路径中的crypto-config就是我们刚才生成的目录
+
+    - &Org0
+        # DefaultOrg defines the organization which is used in the sampleconfig
+        # of the fabric.git development environment
+        Name: Org0MSP
+
+        # ID to load the MSP definition as
+        ID: Org0MSP
+
+        MSPDir: crypto-config/peerOrganizations/org0.imocc.com/msp
+
+        AnchorPeers:
+            # AnchorPeers defines the location of peers which can be used
+            # for cross org gossip communication.  Note, this value is only
+            # encoded in the genesis block in the Application section context
+            - Host: peer0.org0.imocc.com
+              Port: 7051
+
+    - &Org1
+        # DefaultOrg defines the organization which is used in the sampleconfig
+        # of the fabric.git development environment
+        Name: Org1MSP
+
+        # ID to load the MSP definition as
+        ID: Org1MSP
+
+        MSPDir: crypto-config/peerOrganizations/org1.imocc.com/msp
+
+        AnchorPeers:
+            # AnchorPeers defines the location of peers which can be used
+            # for cross org gossip communication.  Note, this value is only
+            # encoded in the genesis block in the Application section context
+            - Host: peer0.org1.imocc.com
+              Port: 7051
+
+################################################################################
+#
+#   SECTION: Orderer
+#
+#   - This section defines the values to encode into a config transaction or
+#   genesis block for orderer related parameters
+#
+################################################################################
+# order组织相关的配置
+Orderer: &OrdererDefaults
+
+    # Orderer Type: The orderer implementation to start
+    # Available types are "solo" and "kafka"
+    OrdererType: solo # 共识机制
+
+    Addresses:
+        - orderer.imocc.com:7050 # 域名，如果是kafka类型，那么此处会有多个
+
+    # Batch Timeout: The amount of time to wait before creating a batch
+    BatchTimeout: 2s # 出块时间间隔
+
+    # Batch Size: Controls the number of messages batched into a block
+    BatchSize: # 每个块的大小
+
+        # Max Message Count: The maximum number of messages to permit in a batch
+        MaxMessageCount: 10
+
+        # Absolute Max Bytes: The absolute maximum number of bytes allowed for
+        # the serialized messages in a batch.
+        AbsoluteMaxBytes: 99 MB
+
+        # Preferred Max Bytes: The preferred maximum number of bytes allowed for
+        # the serialized messages in a batch. A message larger than the preferred
+        # max bytes will result in a batch larger than preferred max bytes.
+        PreferredMaxBytes: 512 KB
+    # 如果是kafka的共识机制，那么他有broker的配置
+    Kafka:
+        # Brokers: A list of Kafka brokers to which the orderer connects
+        # NOTE: Use IP:port notation
+        Brokers:
+            - 127.0.0.1:9092
+
+    # Organizations is the list of orgs which are defined as participants on
+    # the orderer side of the network
+    Organizations:
+
+################################################################################
+#
+#   SECTION: Application
+#
+#   - This section defines the values to encode into a config transaction or
+#   genesis block for application related parameters
+#
+################################################################################
+Application: &ApplicationDefaults
+
+    # Organizations is the list of orgs which are defined as participants on
+    # the application side of the network
+    Organizations:

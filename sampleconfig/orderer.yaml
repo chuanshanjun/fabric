@@ -163,7 +163,7 @@ Kafka:
         # <LongInterval> for a total of <LongTotal> until they succeed.
         # Note that the orderer will be unable to write to or read from a
         # channel until all of the steps above have been completed successfully.
-        ShortInterval: 5s
+        ShortInterval: 5s # 我们使用环境变量替换 1 首先是Order节点，kafka分区,retry分区,shortInterval分区 ORDERER_KAFKA_RETRY_SHORTINTERVAL
         ShortTotal: 10m
         LongInterval: 5m
         LongTotal: 12h
