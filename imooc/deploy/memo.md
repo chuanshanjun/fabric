@@ -52,11 +52,13 @@ peer channel update -o orderer.imocc.com:7050 -c mychannel -f /etc/hyperledger/c
 ## 链码安装
 ``` bash
 peer chaincode install -n assets -v 1.0.0 -l golang -p github.com/chaincode/assetsExchange
+peer chaincode install -n badexample -v 1.0.0 -l golang -p github.com/chaincode/badexample
 ```
 
 ## 链码实例化
 ``` bash
 peer chaincode instantiate -o orderer.imocc.com:7050 -C assetschannel -n assets -l golang -v 1.0.0 -c '{"Args":["init"]}'
+peer chaincode instantiate -o orderer.imocc.com:7050 -C mychannel -n badexample -l golang -v 1.0.0 -c '{"Args":["init"]}'
 ```
 
 ## 链码交互
@@ -83,6 +85,7 @@ peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAsset", "asse
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryUser", "user2"]}'
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1"]}'
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1", "all"]}'
+peer chaincode query -C mychannel -n badexample -c '{"Args":[]}'
 ```
 
 ## 命令行模式的背书策略

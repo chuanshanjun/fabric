@@ -27,9 +27,9 @@ services:
     ports:
       - 7050:7050 # 17050:7050 Order就对外暴露了7050端口
     volumes: # 文件的映射将order的
-        #- ./config/:/etc/hyperledger/config # 将本地的配置文件映射进去
+        - ./config/:/etc/hyperledger/config # 将本地的配置文件映射进去
         # 因为上面只需要genesis，所以我们也可以最小话映射一个创世区块
-        - ./config/genesis.block:/etc/hyperledger/config/genesis.block # 将创世区块映射进去
+        #- ./config/genesis.block:/etc/hyperledger/config/genesis.block # 将创世区块映射进去
         # 但msp证书还是需要整个路径映射进去的，因为上面的参数也是整个路径
         - ./crypto-config/ordererOrganizations/imocc.com/orderers/orderer.imocc.com/:/etc/hyperledger/orderer # 将order msp证书路径映射到容器中
 
@@ -37,7 +37,8 @@ services:
   peer.base: # peer的公共服务
     image: hyperledger/fabric-peer:x86_64-1.0.0
     environment: # 前缀：CORE 环境变量注入的前缀变成了core而不是ordr
-      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock # docker的服务端注入 将本机的docker server注入到server中 在peer节点中可能会对chaincode做一些编译、启动之类的操作
+      # docker的服务端注入 将本机的docker server注入到server中 在peer节点中可能会对chaincode做一些编译、启动之类的操作
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
       - CORE_LOGGING_PEER=debug
       - CORE_CHAINCODE_LOGGING_LEVEL=DEBUG
       - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/peer/msp # msp证书（节点证书）
@@ -45,7 +46,8 @@ services:
       # # the following setting starts chaincode containers on the same
       # # bridge network as the peers
       # # https://docs.docker.com/compose/networking/
-      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=deploy_default # cc与peer节点使用同一个网络 将chaincode的网络与peer节点的网络绑定到一起，如果不设置这个参数的话，链码可能连不上这个节点
+      # cc与peer节点使用同一个网络 将chaincode的网络与peer节点的网络绑定到一起，如果不设置这个参数的话，链码可能连不上peer节点
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=deploy_default
     working_dir: /opt/gopath/src/github.com/hyperledger/fabric
     command: peer node start
 
@@ -140,7 +142,7 @@ services:
     depends_on:
       - orderer.imocc.com
 
-  cli: # peer节点客户端 交易都是从客户端发起 需要用到User证书
+  cli: # peer节点客户端，而且一次智能链接到一个peer节点上,之所以要配置一个client服务，是因为所有的交易都是从客户端发起 需要用到User证书
     container_name: cli
     image: hyperledger/fabric-tools
     tty: true

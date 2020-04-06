@@ -83,4 +83,4 @@ PeerOrgs:
       Count: 1
       Start: 2
     Users:
-      Count: 3 # Admin & User1 & User2 & User3 生成4个用户(包括admin user1 user2 user3)
+      Count: 3 # Admin & User1 & User2 & User3 生成4个用户(包括admin user1 user2 user3 )
