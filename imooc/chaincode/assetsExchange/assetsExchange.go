@@ -369,7 +369,7 @@ func queryAsset(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	}
 
 	// 套路2: 验证参数的正确性
-	assetId := args[1]
+	assetId := args[0]
 	if assetId == "" {
 		return shim.Error("invalid args")
 	}
@@ -390,10 +390,18 @@ func queryAssetHistory(stub shim.ChaincodeStubInterface, args []string) pb.Respo
 
 	// 套路2: 验证参数的正确性
 	assetId := args[0]
-	queryType := args[1]
 	if assetId == "" {
 		return shim.Error("invalid args")
 	}
+	queryType := "all"
+	if len(args) == 2 {
+		queryType = args[1]
+	}
+
+	if queryType != "all" && queryType != "enroll" && queryType != "exchange" {
+		return shim.Error(fmt.Sprintf("queryType unknown %s", queryType))
+	}
+
 	// 套路3：验证数据是否存在 应该存在 or 不应该存在
 	assetBytes, err := stub.GetState(constructAssetKey(assetId))
 	if err != nil || len(assetBytes) == 0 {
@@ -459,7 +467,7 @@ func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 		return assetExchange(stub, args)
 	case "queryUser":
 		return queryUser(stub, args)
-	case "queryAssert":
+	case "queryAsset":
 		return queryAsset(stub, args)
 	case "queryAssetHistory":
 		return queryAssetHistory(stub, args)

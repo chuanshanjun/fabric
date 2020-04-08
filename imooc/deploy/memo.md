@@ -24,6 +24,7 @@ configtxgen -profile OneOrgOrdererGenesis -outputBlock ./config/genesis.block
 ## 生成通道的创世交易
 ``` bash
 configtxgen -profile TwoOrgChannel -outputCreateChannelTx ./config/mychannel.tx -channelID mychannel
+configtxgen -profile TwoOrgChannel -outputCreateChannelTx ./config/assetschannel.tx -channelID assetsChannel
 ```
 
 ## 生成组织关于通道的锚节点（主节点）交易
@@ -51,14 +52,18 @@ peer channel update -o orderer.imocc.com:7050 -c mychannel -f /etc/hyperledger/c
 
 ## 链码安装
 ``` bash
-peer chaincode install -n assets -v 1.0.0 -l golang -p github.com/chaincode/assetsExchange
+peer chaincode install -n assetsexchange -v 1.0.0 -l golang -p github.com/chaincode/assetsExchange
 peer chaincode install -n badexample -v 1.0.0 -l golang -p github.com/chaincode/badexample
+最终版本（因为错误导致我们把链码名字换过来） assetsexchange->assets
+peer chaincode install -n assets -v 1.0.0 -l golang -p github.com/chaincode/assetsExchange
 ```
 
 ## 链码实例化
 ``` bash
-peer chaincode instantiate -o orderer.imocc.com:7050 -C assetschannel -n assets -l golang -v 1.0.0 -c '{"Args":["init"]}'
+peer chaincode instantiate -o orderer.imocc.com:7050 -C assetschannel -n assetsexchange -l golang -v 1.0.0 -c '{"Args":["init"]}' -P "OR('org0MSP.member','org1MSP.admin')"
 peer chaincode instantiate -o orderer.imocc.com:7050 -C mychannel -n badexample -l golang -v 1.0.0 -c '{"Args":["init"]}'
+最终版本assetsexchange->assets, -P 去掉
+peer chaincode instantiate -o orderer.imocc.com:7050 -C assetschannel -n assets -l golang -v 1.0.0 -c '{"Args":["init"]}'
 ```
 
 ## 链码交互
@@ -70,10 +75,15 @@ peer chaincode invoke -C assetschannel -n assets -c '{"Args":["assetExchange", "
 peer chaincode invoke -C assetschannel -n assets -c '{"Args":["userDestroy", "user1"]}'
 ```
 
-## 链码升级
+## 链码升级(升级完还是失败)
 ``` bash
+最后将assetsexchange->assets, -P策略去除
+后来的二次升级是因为源代码又bug -v 1.0.0 -> -v 1.0.1
 peer chaincode install -n assets -v 1.0.1 -l golang -p github.com/chaincode/assetsExchange
 peer chaincode upgrade -C assetschannel -n assets -v 1.0.1 -c '{"Args":[""]}'
+自己代码还写错了继续升级
+peer chaincode install -n assets -v 1.0.2 -l golang -p github.com/chaincode/assetsExchange
+peer chaincode upgrade -C assetschannel -n assets -v 1.0.2 -c '{"Args":[""]}'
 ```
 
 
@@ -85,6 +95,8 @@ peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAsset", "asse
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryUser", "user2"]}'
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1"]}'
 peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1", "all"]}'
+peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1", "enroll"]}'
+peer chaincode query -C assetschannel -n assets -c '{"Args":["queryAssetHistory", "asset1", " "]}'
 peer chaincode query -C mychannel -n badexample -c '{"Args":[]}'
 ```
 

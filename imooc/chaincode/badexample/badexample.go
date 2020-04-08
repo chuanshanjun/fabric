@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/gpmgo/gopm/modules/log"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	"math/rand"
@@ -18,6 +19,7 @@ type BadExampleCC struct {
 // Init()及Invoke是每个chaincode必须实现的方法
 func (c *BadExampleCC) Init(stubInterface shim.ChaincodeStubInterface) pb.Response {
 	// 初始化的时候，直接返回初始化成功，并没有做任何初始化的操作
+	log.Info("初始化成功")
 	return shim.Success(nil)
 }
 
