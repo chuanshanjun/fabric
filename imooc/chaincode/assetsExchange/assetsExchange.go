@@ -98,7 +98,8 @@ func userRegister(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	}
 
 	// 成功返回
-	return shim.Success(nil)
+	fmt.Println("user registered")
+	return shim.Success(userBytes)
 }
 
 // 用户销户
@@ -453,6 +454,10 @@ func queryAssetHistory(stub shim.ChaincodeStubInterface, args []string) pb.Respo
 	return shim.Success(historiesBytes)
 }
 
+func (c *AssertsExchangeCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
+	return shim.Success(nil)
+}
+
 func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	funcName, args := stub.GetFunctionAndParameters()
 
@@ -477,5 +482,8 @@ func (c *AssertsExchangeCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 }
 
 func main() {
-	
+	err := shim.Start(new(AssertsExchangeCC))
+	if err != nil {
+		fmt.Printf("Error starting AssertExchange chaincode: %s", err)
+	}
 }

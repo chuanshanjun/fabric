@@ -24,7 +24,7 @@ configtxgen -profile OneOrgOrdererGenesis -outputBlock ./config/genesis.block
 ## 生成通道的创世交易
 ``` bash
 configtxgen -profile TwoOrgChannel -outputCreateChannelTx ./config/mychannel.tx -channelID mychannel
-configtxgen -profile TwoOrgChannel -outputCreateChannelTx ./config/assetschannel.tx -channelID assetsChannel
+configtxgen -profile TwoOrgChannel -outputCreateChannelTx ./config/assetschannel.tx -channelID assetschannel
 ```
 
 ## 生成组织关于通道的锚节点（主节点）交易
