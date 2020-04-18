@@ -134,6 +134,10 @@ func (id *identity) GetOrganizationalUnits() []*OUIdentifier {
 	return res
 }
 
+func (id *identity) Anonymous() bool {
+	return false
+}
+
 // Verify checks against a signature and a message
 // to determine whether this identity produced the
 // signature; it returns nil if so or an error otherwise

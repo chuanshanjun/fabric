@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 package txn
 
 import (
-	"bytes"
 	reqContext "context"
 	"math/rand"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/multi"
 	"github.com/pkg/errors"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
@@ -60,13 +60,8 @@ func New(request fab.TransactionRequest) (*fab.Transaction, error) {
 	}
 
 	responsePayload := request.ProposalResponses[0].ProposalResponse.Payload
-	for _, r := range request.ProposalResponses {
-		if r.ProposalResponse.Response.Status != 200 {
-			return nil, errors.Errorf("proposal response was not successful, error code %d, msg %s", r.ProposalResponse.Response.Status, r.ProposalResponse.Response.Message)
-		}
-		if !bytes.Equal(responsePayload, r.ProposalResponse.Payload) {
-			return nil, errors.Errorf("proposal response payloads are not the same (%v, %v)", responsePayload, r.ProposalResponse.Payload)
-		}
+	if err := validateProposalResponses(request.ProposalResponses); err != nil {
+		return nil, err
 	}
 
 	// fill endorsements
@@ -102,9 +97,18 @@ func New(request fab.TransactionRequest) (*fab.Transaction, error) {
 	}, nil
 }
 
+func validateProposalResponses(responses []*fab.TransactionProposalResponse) error {
+	for _, r := range responses {
+		if r.ProposalResponse.Response.Status < int32(common.Status_SUCCESS) || r.ProposalResponse.Response.Status >= int32(common.Status_BAD_REQUEST) {
+			return errors.Errorf("proposal response was not successful, error code %d, msg %s", r.ProposalResponse.Response.Status, r.ProposalResponse.Response.Message)
+		}
+	}
+	return nil
+}
+
 // Send send a transaction to the chain’s orderer service (one or more orderer endpoints) for consensus and committing to the ledger.
 func Send(reqCtx reqContext.Context, tx *fab.Transaction, orderers []fab.Orderer) (*fab.TransactionResponse, error) {
-	if orderers == nil || len(orderers) == 0 {
+	if len(orderers) == 0 {
 		return nil, errors.New("orderers is nil")
 	}
 	if tx == nil {
@@ -166,9 +170,7 @@ func broadcastEnvelope(reqCtx reqContext.Context, envelope *fab.SignedEnvelope, 
 
 	// Copy aside the ordering service endpoints
 	randOrderers := []fab.Orderer{}
-	for _, o := range orderers {
-		randOrderers = append(randOrderers, o)
-	}
+	randOrderers = append(randOrderers, orderers...)
 
 	// Iterate them in a random order and try broadcasting 1 by 1
 	var errResp error
@@ -187,7 +189,7 @@ func sendBroadcast(reqCtx reqContext.Context, envelope *fab.SignedEnvelope, orde
 	logger.Debugf("Broadcasting envelope to orderer :%s\n", orderer.URL())
 	// Send request
 	if _, err := orderer.SendBroadcast(reqCtx, envelope); err != nil {
-		logger.Debugf("Receive Error Response from orderer :%v\n", err)
+		logger.Debugf("Receive Error Response from orderer :%s\n", err)
 		return nil, errors.Wrapf(err, "calling orderer '%s' failed", orderer.URL())
 	}
 
@@ -197,7 +199,7 @@ func sendBroadcast(reqCtx reqContext.Context, envelope *fab.SignedEnvelope, orde
 
 // SendPayload sends the given payload to each orderer and returns a block response
 func SendPayload(reqCtx reqContext.Context, payload *common.Payload, orderers []fab.Orderer) (*common.Block, error) {
-	if orderers == nil || len(orderers) == 0 {
+	if len(orderers) == 0 {
 		return nil, errors.New("orderers not set")
 	}
 
@@ -212,9 +214,7 @@ func SendPayload(reqCtx reqContext.Context, payload *common.Payload, orderers []
 
 	// Copy aside the ordering service endpoints
 	randOrderers := []fab.Orderer{}
-	for _, o := range orderers {
-		randOrderers = append(randOrderers, o)
-	}
+	randOrderers = append(randOrderers, orderers...)
 
 	// Iterate them in a random order and try broadcasting 1 by 1
 	var errResp error
@@ -234,19 +234,32 @@ func sendEnvelope(reqCtx reqContext.Context, envelope *fab.SignedEnvelope, order
 
 	logger.Debugf("Broadcasting envelope to orderer :%s\n", orderer.URL())
 	blocks, errs := orderer.SendDeliver(reqCtx, envelope)
+
+	// This function currently returns the last received block and error.
 	var block *common.Block
+	var err multi.Errors
+
+read:
 	for {
 		select {
 		case b, ok := <-blocks:
 			// We need to block until SendDeliver releases the connection. Currently
-			// this is trigged by the go chan closing.
+			// this is triggered by the go chan closing.
 			// TODO: we may want to refactor (e.g., adding a synchronous SendDeliver)
 			if !ok {
-				return block, nil
+				break read
 			}
 			block = b
-		case err := <-errs:
-			return nil, errors.Wrapf(err, "error from orderer")
+		case e := <-errs:
+			err = append(err, e)
 		}
 	}
+
+	// drain remaining errors.
+	for i := 0; i < len(errs); i++ {
+		e := <-errs
+		err = append(err, e)
+	}
+
+	return block, err.ToError()
 }

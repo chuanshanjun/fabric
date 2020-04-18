@@ -10,7 +10,6 @@ import (
 	"fmt"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
@@ -31,16 +30,14 @@ type Dispatcher struct {
 	params
 	context                context.Client
 	chConfig               fab.ChannelCfg
-	signingMgr             core.SigningManager
 	connection             api.Connection
 	connectionRegistration *ConnectionReg
 	connectionProvider     api.ConnectionProvider
+	discoveryService       fab.DiscoveryService
 }
 
-type handler func(esdispatcher.Event)
-
 // New creates a new dispatcher
-func New(context context.Client, chConfig fab.ChannelCfg, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
+func New(context context.Client, chConfig fab.ChannelCfg, discoveryService fab.DiscoveryService, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
 	params := defaultParams()
 	options.Apply(params, opts)
 
@@ -49,6 +46,7 @@ func New(context context.Client, chConfig fab.ChannelCfg, connectionProvider api
 		params:             *params,
 		context:            context,
 		chConfig:           chConfig,
+		discoveryService:   discoveryService,
 		connectionProvider: connectionProvider,
 	}
 }
@@ -99,13 +97,7 @@ func (ed *Dispatcher) HandleConnectEvent(e esdispatcher.Event) {
 		return
 	}
 
-	discoveryService, err := ed.context.DiscoveryProvider().CreateDiscoveryService(ed.chConfig.ID())
-	if err != nil {
-		evt.ErrCh <- nil
-		return
-	}
-
-	peers, err := discoveryService.GetPeers()
+	peers, err := ed.discoveryService.GetPeers()
 	if err != nil {
 		evt.ErrCh <- err
 		return
@@ -145,7 +137,7 @@ func (ed *Dispatcher) HandleDisconnectEvent(e esdispatcher.Event) {
 		return
 	}
 
-	logger.Debugf("Closing connection...")
+	logger.Debug("Closing connection...")
 
 	ed.connection.Close()
 	ed.connection = nil
@@ -170,13 +162,13 @@ func (ed *Dispatcher) HandleRegisterConnectionEvent(e esdispatcher.Event) {
 func (ed *Dispatcher) HandleConnectedEvent(e esdispatcher.Event) {
 	evt := e.(*ConnectedEvent)
 
-	logger.Debugf("Handling connected event: %v", evt)
+	logger.Debugf("Handling connected event: %+v", evt)
 
 	if ed.connectionRegistration != nil && ed.connectionRegistration.Eventch != nil {
 		select {
 		case ed.connectionRegistration.Eventch <- NewConnectionEvent(true, nil):
 		default:
-			logger.Warnf("Unable to send to connection event channel.")
+			logger.Warn("Unable to send to connection event channel.")
 		}
 	}
 }
@@ -197,7 +189,7 @@ func (ed *Dispatcher) HandleDisconnectedEvent(e esdispatcher.Event) {
 		select {
 		case ed.connectionRegistration.Eventch <- NewConnectionEvent(false, evt.Err):
 		default:
-			logger.Warnf("Unable to send to connection event channel.")
+			logger.Warn("Unable to send to connection event channel.")
 		}
 	} else {
 		logger.Warnf("Disconnected from event server: %s", evt.Err)
@@ -218,7 +210,7 @@ func (ed *Dispatcher) registerHandlers() {
 
 func (ed *Dispatcher) clearConnectionRegistration() {
 	if ed.connectionRegistration != nil {
-		logger.Debugf("Closing connection registration event channel.")
+		logger.Debug("Closing connection registration event channel.")
 		close(ed.connectionRegistration.Eventch)
 		ed.connectionRegistration = nil
 	}

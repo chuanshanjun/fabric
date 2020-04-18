@@ -9,20 +9,25 @@ package mocks
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric-sdk-go/pkg/util/test"
+	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
+	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/ledger/rwset/kvrwset"
+	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-
-	rwsetutil "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
-	kvrwset "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/ledger/rwset/kvrwset"
-	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
+	"google.golang.org/grpc/credentials"
 )
 
 // MockEndorserServer mock endoreser server to process endorsement proposals
 type MockEndorserServer struct {
 	ProposalError error
 	AddkvWrite    bool
+	srv           *grpc.Server
+	Creds         credentials.TransportCredentials
+	wg            sync.WaitGroup
 }
 
 // ProcessProposal mock implementation that returns success if error is not set
@@ -49,9 +54,9 @@ func (m *MockEndorserServer) createProposalResponsePayload() []byte {
 
 	if m.AddkvWrite {
 		txRwSet.NsRwSets = []*rwsetutil.NsRwSet{
-			&rwsetutil.NsRwSet{NameSpace: "ns1", KvRwSet: &kvrwset.KVRWSet{
-				Reads:  []*kvrwset.KVRead{&kvrwset.KVRead{Key: "key1", Version: &kvrwset.Version{BlockNum: 1, TxNum: 1}}},
-				Writes: []*kvrwset.KVWrite{&kvrwset.KVWrite{Key: "key2", IsDelete: false, Value: []byte("value2")}},
+			{NameSpace: "ns1", KvRwSet: &kvrwset.KVRWSet{
+				Reads:  []*kvrwset.KVRead{{Key: "key1", Version: &kvrwset.Version{BlockNum: 1, TxNum: 1}}},
+				Writes: []*kvrwset.KVWrite{{Key: "key2", IsDelete: false, Value: []byte("value2")}},
 			}}}
 	}
 
@@ -72,16 +77,45 @@ func (m *MockEndorserServer) createProposalResponsePayload() []byte {
 	return prpBytes
 }
 
-//StartEndorserServer starts mock server for unit testing purpose
-func StartEndorserServer(endorserTestURL string) *MockEndorserServer {
-	grpcServer := grpc.NewServer()
-	lis, err := net.Listen("tcp", endorserTestURL)
-	if err != nil {
-		panic(fmt.Sprintf("Error starting endorser server: %s", err))
+// Start the mock broadcast server
+func (m *MockEndorserServer) Start(address string) string {
+	if m.srv != nil {
+		panic("MockBroadcastServer already started")
 	}
-	endorserServer := &MockEndorserServer{}
-	pb.RegisterEndorserServer(grpcServer, endorserServer)
-	fmt.Printf("Test endorser server started\n")
-	go grpcServer.Serve(lis)
-	return endorserServer
+
+	// pass in TLS creds if present
+	if m.Creds != nil {
+		m.srv = grpc.NewServer(grpc.Creds(m.Creds))
+	} else {
+		m.srv = grpc.NewServer()
+	}
+
+	lis, err := net.Listen("tcp", address)
+	if err != nil {
+		panic(fmt.Sprintf("Error starting BroadcastServer %s", err))
+	}
+	addr := lis.Addr().String()
+
+	test.Logf("Starting MockEventServer [%s]", addr)
+	pb.RegisterEndorserServer(m.srv, m)
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		if err := m.srv.Serve(lis); err != nil {
+			test.Logf("StartMockBroadcastServer failed [%s]", err)
+		}
+	}()
+
+	return addr
+}
+
+// Stop the mock broadcast server and wait for completion.
+func (m *MockEndorserServer) Stop() {
+	if m.srv == nil {
+		panic("MockBroadcastServer not started")
+	}
+
+	m.srv.Stop()
+	m.wg.Wait()
+	m.srv = nil
 }

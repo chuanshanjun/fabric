@@ -32,12 +32,13 @@ var logger = logging.NewLogger("fabsdk/fab")
 // EventHubConnection manages the connection and client stream
 // to the event hub server
 type EventHubConnection struct {
-	comm.GRPCConnection
+	*comm.StreamConnection
+	url string
 }
 
 // New returns a new Connection to the event hub.
 func New(ctx fabcontext.Client, chConfig fab.ChannelCfg, url string, opts ...options.Opt) (*EventHubConnection, error) {
-	connect, err := comm.NewConnection(
+	connect, err := comm.NewStreamConnection(
 		ctx, chConfig,
 		func(grpcconn *grpc.ClientConn) (grpc.ClientStream, error) {
 			return pb.NewEventsClient(grpcconn).Chat(context.Background())
@@ -49,7 +50,8 @@ func New(ctx fabcontext.Client, chConfig fab.ChannelCfg, url string, opts ...opt
 	}
 
 	return &EventHubConnection{
-		GRPCConnection: *connect,
+		StreamConnection: connect,
+		url:              url,
 	}, nil
 }
 
@@ -101,22 +103,22 @@ func (c *EventHubConnection) Send(emsg *pb.Event) error {
 // Receive receives events from the event hub server
 func (c *EventHubConnection) Receive(eventch chan<- interface{}) {
 	for {
-		logger.Debugf("Listening for events...")
+		logger.Debug("Listening for events...")
 		if c.EventHubStream() == nil {
-			logger.Warnf("The stream has closed. Terminating loop.")
+			logger.Warn("The stream has closed. Terminating loop.")
 			break
 		}
 
 		in, err := c.EventHubStream().Recv()
 
 		if c.Closed() {
-			logger.Debugf("The connection has closed. Terminating loop.")
+			logger.Debug("The connection has closed. Terminating loop.")
 			break
 		}
 
 		if err == io.EOF {
 			// This signifies that the stream has been terminated at the client-side. No need to send an event.
-			logger.Debugf("Received EOF from stream.")
+			logger.Debug("Received EOF from stream.")
 			break
 		}
 
@@ -126,8 +128,21 @@ func (c *EventHubConnection) Receive(eventch chan<- interface{}) {
 			break
 		}
 		logger.Debugf("Got event %#v", in)
-		eventch <- in
-
+		eventch <- NewEvent(in, c.url)
 	}
-	logger.Debugf("Exiting stream listener")
+	logger.Debug("Exiting stream listener")
+}
+
+// Event contains the event hub event as well as the event source
+type Event struct {
+	SourceURL string
+	Event     interface{}
+}
+
+// NewEvent returns a new event hub event
+func NewEvent(event interface{}, sourceURL string) *Event {
+	return &Event{
+		SourceURL: sourceURL,
+		Event:     event,
+	}
 }

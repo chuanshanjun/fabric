@@ -7,16 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package defsvc
 
 import (
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 
 	discovery "github.com/hyperledger/fabric-sdk-go/pkg/client/common/discovery/staticdiscovery"
-	selection "github.com/hyperledger/fabric-sdk-go/pkg/client/common/selection/staticselection"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/provider/chpvdr"
 )
-
-type peerCreator interface {
-	CreatePeerFromConfig(peerCfg *core.NetworkPeer) (fab.Peer, error)
-}
 
 // ProviderFactory represents the default SDK provider factory for services.
 type ProviderFactory struct{}
@@ -27,12 +22,13 @@ func NewProviderFactory() *ProviderFactory {
 	return &f
 }
 
-// CreateDiscoveryProvider returns a new default implementation of discovery provider
-func (f *ProviderFactory) CreateDiscoveryProvider(config core.Config, fabPvdr fab.InfraProvider) (fab.DiscoveryProvider, error) {
-	return discovery.New(config, fabPvdr)
+// CreateLocalDiscoveryProvider returns a static local discovery provider. This should be changed
+// to use the dynamic provider when Fabric 1.1 is no longer supported
+func (f *ProviderFactory) CreateLocalDiscoveryProvider(config fab.EndpointConfig) (fab.LocalDiscoveryProvider, error) {
+	return discovery.NewLocalProvider(config)
 }
 
-// CreateSelectionProvider returns a new default implementation of selection service
-func (f *ProviderFactory) CreateSelectionProvider(config core.Config) (fab.SelectionProvider, error) {
-	return selection.New(config)
+// CreateChannelProvider returns a new default implementation of channel provider
+func (f *ProviderFactory) CreateChannelProvider(config fab.EndpointConfig) (fab.ChannelProvider, error) {
+	return chpvdr.New(config)
 }

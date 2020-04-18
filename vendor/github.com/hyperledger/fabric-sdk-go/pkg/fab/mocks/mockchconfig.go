@@ -16,22 +16,37 @@ import (
 
 // MockChannelCfg contains mock channel configuration
 type MockChannelCfg struct {
-	MockID          string
-	MockMSPs        []*msp.MSPConfig
-	MockAnchorPeers []*fab.OrgAnchorPeer
-	MockOrderers    []string
-	MockVersions    *fab.Versions
-	MockMembership  fab.ChannelMembership
+	MockID           string
+	MockBlockNumber  uint64
+	MockMSPs         []*msp.MSPConfig
+	MockAnchorPeers  []*fab.OrgAnchorPeer
+	MockOrderers     []string
+	MockVersions     *fab.Versions
+	MockMembership   fab.ChannelMembership
+	MockCapabilities map[fab.ConfigGroupKey]map[string]bool
 }
 
 // NewMockChannelCfg ...
 func NewMockChannelCfg(id string) *MockChannelCfg {
-	return &MockChannelCfg{MockID: id}
+	capabilities := make(map[fab.ConfigGroupKey]map[string]bool)
+	capabilities[fab.ChannelGroupKey] = make(map[string]bool)
+	capabilities[fab.ApplicationGroupKey] = make(map[string]bool)
+	capabilities[fab.OrdererGroupKey] = make(map[string]bool)
+
+	return &MockChannelCfg{
+		MockID:           id,
+		MockCapabilities: capabilities,
+	}
 }
 
 // ID returns name
 func (cfg *MockChannelCfg) ID() string {
 	return cfg.MockID
+}
+
+// BlockNumber returns block number
+func (cfg *MockChannelCfg) BlockNumber() uint64 {
+	return cfg.MockBlockNumber
 }
 
 // MSPs returns msps
@@ -52,6 +67,15 @@ func (cfg *MockChannelCfg) Orderers() []string {
 // Versions returns versions
 func (cfg *MockChannelCfg) Versions() *fab.Versions {
 	return cfg.MockVersions
+}
+
+// HasCapability indicates whether or not the given group has the given capability
+func (cfg *MockChannelCfg) HasCapability(group fab.ConfigGroupKey, capability string) bool {
+	capabilities, ok := cfg.MockCapabilities[group]
+	if !ok {
+		return false
+	}
+	return capabilities[capability]
 }
 
 // MockChannelConfig mockcore query channel configuration

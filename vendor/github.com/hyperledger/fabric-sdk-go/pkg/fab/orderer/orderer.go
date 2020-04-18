@@ -9,8 +9,10 @@ package orderer
 import (
 	reqContext "context"
 	"crypto/x509"
+	"io"
 	"time"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/multi"
 	"github.com/pkg/errors"
 	"github.com/spf13/cast"
 	"google.golang.org/grpc"
@@ -19,9 +21,9 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	ab "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric/protos/orderer"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/verifier"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/status"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/context"
 	"github.com/hyperledger/fabric-sdk-go/pkg/core/config/comm"
@@ -39,7 +41,7 @@ const (
 
 // Orderer allows a client to broadcast a transaction.
 type Orderer struct {
-	config         core.Config
+	config         fab.EndpointConfig
 	url            string
 	serverName     string
 	tlsCACert      *x509.Certificate
@@ -55,7 +57,7 @@ type Orderer struct {
 type Option func(*Orderer) error
 
 // New Returns a Orderer instance
-func New(config core.Config, opts ...Option) (*Orderer, error) {
+func New(config fab.EndpointConfig, opts ...Option) (*Orderer, error) {
 	orderer := &Orderer{
 		config:      config,
 		commManager: &defCommManager{},
@@ -79,6 +81,10 @@ func New(config core.Config, opts ...Option) (*Orderer, error) {
 		if err != nil {
 			return nil, err
 		}
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			return verifier.VerifyPeerCertificate(rawCerts, verifiedChains)
+		}
+
 		grpcOpts = append(grpcOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		grpcOpts = append(grpcOpts, grpc.WithInsecure())
@@ -87,7 +93,7 @@ func New(config core.Config, opts ...Option) (*Orderer, error) {
 	grpcOpts = append(grpcOpts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxCallRecvMsgSize),
 		grpc.MaxCallSendMsgSize(maxCallSendMsgSize)))
 
-	orderer.dialTimeout = config.TimeoutOrDefault(core.OrdererConnection)
+	orderer.dialTimeout = config.Timeout(fab.OrdererConnection)
 	orderer.url = endpoint.ToAddress(orderer.url)
 	orderer.grpcDialOption = grpcOpts
 
@@ -132,19 +138,17 @@ func WithInsecure() Option {
 
 // FromOrdererConfig is a functional option for the orderer.New constructor that configures a new orderer
 // from a apiconfig.OrdererConfig struct
-func FromOrdererConfig(ordererCfg *core.OrdererConfig) Option {
+func FromOrdererConfig(ordererCfg *fab.OrdererConfig) Option {
 	return func(o *Orderer) error {
 		o.url = ordererCfg.URL
+		o.tlsCACert = ordererCfg.TLSCACert
 
-		var err error
-
-		o.tlsCACert, err = ordererCfg.TLSCACerts.TLSCert()
-
-		if err != nil {
-			//Ignore empty cert errors,
-			errStatus, ok := err.(*status.Status)
-			if !ok || errStatus.Code != status.EmptyCert.ToInt32() {
-				return err
+		if ordererCfg.GRPCOptions["allow-insecure"] == false {
+			//verify if certificate was expired or not yet valid
+			err := verifier.ValidateCertificateDates(o.tlsCACert)
+			if err != nil {
+				//log this error
+				logger.Warn(err)
 			}
 		}
 
@@ -161,17 +165,16 @@ func FromOrdererConfig(ordererCfg *core.OrdererConfig) Option {
 // by name from the apiconfig.Config supplied to the constructor, and then constructs a new orderer from it
 func FromOrdererName(name string) Option {
 	return func(o *Orderer) error {
-		ordererCfg, err := o.config.OrdererConfig(name)
-
-		if err != nil {
-			return err
+		ordererCfg, found := o.config.OrdererConfig(name)
+		if !found {
+			return errors.Errorf("orderer config not found for orderer : %s", name)
 		}
 
 		return FromOrdererConfig(ordererCfg)(o)
 	}
 }
 
-func getServerNameOverride(ordererCfg *core.OrdererConfig) string {
+func getServerNameOverride(ordererCfg *fab.OrdererConfig) string {
 	serverNameOverride := ""
 	if str, ok := ordererCfg.GRPCOptions["ssl-target-name-override"].(string); ok {
 		serverNameOverride = str
@@ -179,7 +182,7 @@ func getServerNameOverride(ordererCfg *core.OrdererConfig) string {
 	return serverNameOverride
 }
 
-func getFailFast(ordererCfg *core.OrdererConfig) bool {
+func getFailFast(ordererCfg *fab.OrdererConfig) bool {
 
 	var failFast = true
 	if ff, ok := ordererCfg.GRPCOptions["fail-fast"].(bool); ok {
@@ -188,7 +191,7 @@ func getFailFast(ordererCfg *core.OrdererConfig) bool {
 	return failFast
 }
 
-func getKeepAliveOptions(ordererCfg *core.OrdererConfig) keepalive.ClientParameters {
+func getKeepAliveOptions(ordererCfg *fab.OrdererConfig) keepalive.ClientParameters {
 
 	var kap keepalive.ClientParameters
 	if kaTime, ok := ordererCfg.GRPCOptions["keep-alive-time"].(time.Duration); ok {
@@ -203,7 +206,7 @@ func getKeepAliveOptions(ordererCfg *core.OrdererConfig) keepalive.ClientParamet
 	return kap
 }
 
-func isInsecureConnectionAllowed(ordererCfg *core.OrdererConfig) bool {
+func isInsecureConnectionAllowed(ordererCfg *fab.OrdererConfig) bool {
 	allowInsecure, ok := ordererCfg.GRPCOptions["allow-insecure"].(bool)
 	if ok {
 		return allowInsecure
@@ -277,33 +280,61 @@ func (o *Orderer) SendBroadcast(ctx reqContext.Context, envelope *fab.SignedEnve
 		logger.Debugf("unable to close broadcast client [%s]", err)
 	}
 
-	select {
-	case broadcastStatus := <-responses:
-		return &broadcastStatus, nil
-	case broadcastErr := <-errs:
-		return nil, broadcastErr
+	return wrapStreamStatusRPC(responses, errs)
+}
+
+// wrapStreamStatusRPC returns the last response and err and blocks until the chan is closed.
+func wrapStreamStatusRPC(responses chan common.Status, errs chan error) (*common.Status, error) {
+	var status common.Status
+	var err multi.Errors
+
+read:
+	for {
+		select {
+		case s, ok := <-responses:
+			if !ok {
+				break read
+			}
+			status = s
+		case e := <-errs:
+			err = append(err, e)
+		}
 	}
+
+	// drain remaining errors.
+	for i := 0; i < len(errs); i++ {
+		e := <-errs
+		err = append(err, e)
+	}
+
+	return &status, err.ToError()
 }
 
 func broadcastStream(broadcastClient ab.AtomicBroadcast_BroadcastClient, responses chan common.Status, errs chan error) {
-
-	broadcastResponse, err := broadcastClient.Recv()
-	logger.Debugf("Orderer.broadcastStream - response:%v, error:%v", broadcastResponse, err)
-	if err != nil {
-		rpcStatus, ok := grpcstatus.FromError(err)
-		if ok {
-			err = status.NewFromGRPCStatus(rpcStatus)
+	for {
+		broadcastResponse, err := broadcastClient.Recv()
+		if err == io.EOF {
+			// done
+			close(responses)
+			return
 		}
-		errs <- errors.Wrap(err, "broadcast recv failed")
-		return
-	}
 
-	if broadcastResponse.Status != common.Status_SUCCESS {
-		errs <- status.New(status.OrdererServerStatus, int32(broadcastResponse.Status), broadcastResponse.Info, nil)
-		return
-	}
+		if err != nil {
+			rpcStatus, ok := grpcstatus.FromError(err)
+			if ok {
+				err = status.NewFromGRPCStatus(rpcStatus)
+			}
+			errs <- errors.Wrap(err, "broadcast recv failed")
+			close(responses)
+			return
+		}
 
-	responses <- broadcastResponse.Status
+		if broadcastResponse.Status == common.Status_SUCCESS {
+			responses <- broadcastResponse.Status
+		} else {
+			errs <- status.New(status.OrdererServerStatus, int32(broadcastResponse.Status), broadcastResponse.Info, nil)
+		}
+	}
 }
 
 // SendDeliver sends a deliver request to the ordering service and returns the
@@ -319,10 +350,11 @@ func (o *Orderer) SendDeliver(ctx reqContext.Context, envelope *fab.SignedEnvelo
 		rpcStatus, ok := grpcstatus.FromError(err)
 		if ok {
 			errs <- errors.WithMessage(status.NewFromGRPCStatus(rpcStatus), "connection failed")
-			return responses, errs
+		} else {
+			errs <- status.New(status.OrdererClientStatus, status.ConnectionFailed.ToInt32(), err.Error(), nil)
 		}
 
-		errs <- status.New(status.OrdererClientStatus, status.ConnectionFailed.ToInt32(), err.Error(), nil)
+		close(responses)
 		return responses, errs
 	}
 
@@ -333,6 +365,8 @@ func (o *Orderer) SendDeliver(ctx reqContext.Context, envelope *fab.SignedEnvelo
 		o.releaseConn(ctx, conn)
 
 		errs <- errors.Wrap(err, "deliver failed")
+
+		close(responses)
 		return responses, errs
 	}
 
@@ -343,16 +377,13 @@ func (o *Orderer) SendDeliver(ctx reqContext.Context, envelope *fab.SignedEnvelo
 	}()
 
 	// Send block request envelope
-	logger.Debugf("Requesting blocks from ordering service")
+	logger.Debug("Requesting blocks from ordering service")
 	err = broadcastClient.Send(&common.Envelope{
 		Payload:   envelope.Payload,
 		Signature: envelope.Signature,
 	})
 	if err != nil {
-		o.releaseConn(ctx, conn)
-
-		errs <- errors.Wrap(err, "failed to send block request to orderer")
-		return responses, errs
+		logger.Warnf("failed to send block request to orderer [%s]", err)
 	}
 
 	if err = broadcastClient.CloseSend(); err != nil {
@@ -363,23 +394,29 @@ func (o *Orderer) SendDeliver(ctx reqContext.Context, envelope *fab.SignedEnvelo
 }
 
 func blockStream(deliverClient ab.AtomicBroadcast_DeliverClient, responses chan *common.Block, errs chan error) {
+
 	for {
 		response, err := deliverClient.Recv()
-		if err != nil {
-			errs <- errors.Wrap(err, "recv from ordering service failed")
+		if err == io.EOF {
+			// done
+			close(responses)
 			return
 		}
+
+		if err != nil {
+			errs <- errors.Wrap(err, "recv from ordering service failed")
+			close(responses)
+			return
+		}
+
 		// Assert response type
 		switch t := response.Type.(type) {
-		// Seek operation success, no more resposes
+		// Seek operation success, no more responses
 		case *ab.DeliverResponse_Status:
 			logger.Debugf("Received deliver response status from ordering service: %s", t.Status)
 			if t.Status != common.Status_SUCCESS {
-				errs <- errors.Errorf("error status from ordering service %s", t.Status)
-				return
+				errs <- status.New(status.OrdererServerStatus, int32(t.Status), "error status from ordering service", []interface{}{})
 			}
-			close(responses)
-			return
 
 		// Response is a requested block
 		case *ab.DeliverResponse_Block:
@@ -387,8 +424,8 @@ func blockStream(deliverClient ab.AtomicBroadcast_DeliverClient, responses chan 
 			responses <- response.GetBlock()
 		// Unknown response
 		default:
-			errs <- errors.Errorf("unknown response type from ordering service %T", t)
-			return
+			// ignore unknown types.
+			logger.Infof("unknown response type from ordering service %T", t)
 		}
 	}
 }

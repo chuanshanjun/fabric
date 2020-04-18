@@ -13,11 +13,11 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/multi"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	contextImpl "github.com/hyperledger/fabric-sdk-go/pkg/context"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/txn"
-	"github.com/hyperledger/fabric-sdk-go/pkg/util/errors/multi"
 	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 )
@@ -82,7 +82,7 @@ func createBlockchainInfo(tpr *fab.TransactionProposalResponse) (*common.Blockch
 // Returns the block.
 func (c *Ledger) QueryBlockByHash(reqCtx reqContext.Context, blockHash []byte, targets []fab.ProposalProcessor, verifier ResponseVerifier) ([]*common.Block, error) {
 
-	if blockHash == nil {
+	if len(blockHash) == 0 {
 		return nil, errors.New("blockHash is required")
 	}
 
@@ -209,8 +209,7 @@ func createChaincodeQueryResponse(tpr *fab.TransactionProposalResponse) (*pb.Cha
 
 // QueryConfigBlock returns the current configuration block for the specified channel. If the
 // peer doesn't belong to the channel, return error
-func (c *Ledger) QueryConfigBlock(reqCtx reqContext.Context, targets []fab.ProposalProcessor, verifier ResponseVerifier) (*common.ConfigEnvelope, error) {
-
+func (c *Ledger) QueryConfigBlock(reqCtx reqContext.Context, targets []fab.ProposalProcessor, verifier ResponseVerifier) (*common.Block, error) {
 	if len(targets) == 0 {
 		return nil, errors.New("target(s) required")
 	}
@@ -226,19 +225,7 @@ func (c *Ledger) QueryConfigBlock(reqCtx reqContext.Context, targets []fab.Propo
 		return nil, matchErr
 	}
 
-	block, _ := createCommonBlock(tprs[0])
-
-	return createConfigEnvelope(block.Data.Data[0])
-
-}
-
-func collectProposalResponses(tprs []*fab.TransactionProposalResponse) [][]byte {
-	responses := [][]byte{}
-	for _, tpr := range tprs {
-		responses = append(responses, tpr.ProposalResponse.GetResponse().Payload)
-	}
-
-	return responses
+	return createCommonBlock(tprs[0])
 }
 
 func queryChaincode(reqCtx reqContext.Context, channelID string, request fab.ChaincodeInvokeRequest, targets []fab.ProposalProcessor, verifier ResponseVerifier) ([]*fab.TransactionProposalResponse, error) {
@@ -285,29 +272,4 @@ func createChaincodeInvokeRequest() fab.ChaincodeInvokeRequest {
 		Fcn:         lsccChaincodes,
 	}
 	return cir
-}
-
-func createConfigEnvelope(data []byte) (*common.ConfigEnvelope, error) {
-
-	envelope := &common.Envelope{}
-	if err := proto.Unmarshal(data, envelope); err != nil {
-		return nil, errors.Wrap(err, "unmarshal envelope from config block failed")
-	}
-	payload := &common.Payload{}
-	if err := proto.Unmarshal(envelope.Payload, payload); err != nil {
-		return nil, errors.Wrap(err, "unmarshal payload from envelope failed")
-	}
-	channelHeader := &common.ChannelHeader{}
-	if err := proto.Unmarshal(payload.Header.ChannelHeader, channelHeader); err != nil {
-		return nil, errors.Wrap(err, "unmarshal payload from envelope failed")
-	}
-	if common.HeaderType(channelHeader.Type) != common.HeaderType_CONFIG {
-		return nil, errors.New("block must be of type 'CONFIG'")
-	}
-	configEnvelope := &common.ConfigEnvelope{}
-	if err := proto.Unmarshal(payload.Data, configEnvelope); err != nil {
-		return nil, errors.Wrap(err, "unmarshal config envelope failed")
-	}
-
-	return configEnvelope, nil
 }

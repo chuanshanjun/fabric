@@ -51,18 +51,20 @@ type Client struct {
 }
 
 // New returns a new deliver event client
-func New(context fabcontext.Client, chConfig fab.ChannelCfg, opts ...options.Opt) (*Client, error) {
+func New(context fabcontext.Client, chConfig fab.ChannelCfg, discoveryService fab.DiscoveryService, opts ...options.Opt) (*Client, error) {
 	params := defaultParams()
 	options.Apply(params, opts)
 
-	// Use a context that returns a custom Discovery Provider which
-	// produces event endpoints containing additional GRPC options.
-	deliverCtx := newDeliverContext(context)
+	// Use a custom Discovery Service which wraps the given discovery service
+	// and produces event endpoints containing additional GRPC options.
+	discoveryWrapper, err := endpoint.NewEndpointDiscoveryWrapper(context, chConfig.ID(), discoveryService)
+	if err != nil {
+		return nil, err
+	}
 
 	client := &Client{
 		Client: *client.New(
-			params.permitBlockEvents,
-			dispatcher.New(deliverCtx, chConfig, params.connProvider, opts...),
+			dispatcher.New(context, chConfig, discoveryWrapper, params.connProvider, opts...),
 			opts...,
 		),
 		params: *params,
@@ -78,7 +80,7 @@ func New(context fabcontext.Client, chConfig fab.ChannelCfg, opts ...options.Opt
 }
 
 func (c *Client) seek() error {
-	logger.Debugf("Sending seek request....")
+	logger.Debug("Sending seek request....")
 
 	seekInfo, err := c.seekInfo()
 	if err != nil {
@@ -86,8 +88,10 @@ func (c *Client) seek() error {
 	}
 
 	errch := make(chan error)
-	c.Submit(dispatcher.NewSeekEvent(seekInfo, errch))
-
+	err1 := c.Submit(dispatcher.NewSeekEvent(seekInfo, errch))
+	if err1 != nil {
+		return err1
+	}
 	select {
 	case err = <-errch:
 	case <-time.After(c.respTimeout):
@@ -99,7 +103,7 @@ func (c *Client) seek() error {
 		return err
 	}
 
-	logger.Debugf("Successfully sent seek")
+	logger.Debug("Successfully sent seek")
 	return nil
 }
 
@@ -133,21 +137,4 @@ func (c *Client) seekInfo() (*ab.SeekInfo, error) {
 	default:
 		return nil, errors.Errorf("unsupported seek type:[%s]", c.seekType)
 	}
-}
-
-// deliverContext overrides the DiscoveryProvider
-type deliverContext struct {
-	fabcontext.Client
-}
-
-func newDeliverContext(ctx fabcontext.Client) fabcontext.Client {
-	return &deliverContext{
-		Client: ctx,
-	}
-}
-
-// DiscoveryProvider returns a custom discovery provider which produces
-// event endpoints with additional GRPC options
-func (ctx *deliverContext) DiscoveryProvider() fab.DiscoveryProvider {
-	return endpoint.NewDiscoveryProvider(ctx.Client)
 }

@@ -14,15 +14,12 @@ import (
 	"github.com/pkg/errors"
 
 	selectopts "github.com/hyperledger/fabric-sdk-go/pkg/client/common/selection/options"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/peer"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/txn"
 	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 )
-
-var logger = logging.NewLogger("fabsdk/client")
 
 //EndorsementHandler for handling endorse transactions
 type EndorsementHandler struct {
@@ -51,6 +48,7 @@ func (e *EndorsementHandler) Handle(requestContext *RequestContext, clientContex
 	requestContext.Response.Responses = transactionProposalResponses
 	if len(transactionProposalResponses) > 0 {
 		requestContext.Response.Payload = transactionProposalResponses[0].ProposalResponse.GetResponse().Payload
+		requestContext.Response.ChaincodeStatus = transactionProposalResponses[0].ChaincodeStatus
 	}
 
 	//Delegate to next step if any
@@ -72,7 +70,8 @@ func (h *ProposalProcessorHandler) Handle(requestContext *RequestContext, client
 		if requestContext.SelectionFilter != nil {
 			selectionOpts = append(selectionOpts, selectopts.WithPeerFilter(requestContext.SelectionFilter))
 		}
-		endorsers, err := clientContext.Selection.GetEndorsersForChaincode([]string{requestContext.Request.ChaincodeID}, selectionOpts...)
+
+		endorsers, err := clientContext.Selection.GetEndorsersForChaincode(newChaincodeCalls(requestContext.Request), selectionOpts...)
 		if err != nil {
 			requestContext.Error = errors.WithMessage(err, "Failed to get endorsing peers")
 			return
@@ -84,6 +83,18 @@ func (h *ProposalProcessorHandler) Handle(requestContext *RequestContext, client
 	if h.next != nil {
 		h.next.Handle(requestContext, clientContext)
 	}
+}
+
+func newChaincodeCalls(request Request) []*fab.ChaincodeCall {
+	chaincodes := []*fab.ChaincodeCall{{ID: request.ChaincodeID}}
+	for _, ccCall := range request.InvocationChain {
+		if ccCall.ID == chaincodes[0].ID {
+			chaincodes[0].Collections = ccCall.Collections
+		} else {
+			chaincodes = append(chaincodes, ccCall)
+		}
+	}
+	return chaincodes
 }
 
 //EndorsementValidationHandler for transaction proposal response filtering
@@ -108,17 +119,19 @@ func (f *EndorsementValidationHandler) Handle(requestContext *RequestContext, cl
 }
 
 func (f *EndorsementValidationHandler) validate(txProposalResponse []*fab.TransactionProposalResponse) error {
-	var a1 []byte
+	var a1 *pb.ProposalResponse
 	for n, r := range txProposalResponse {
-		if r.ProposalResponse.GetResponse().Status != int32(common.Status_SUCCESS) {
+		response := r.ProposalResponse.GetResponse()
+		if response.Status < int32(common.Status_SUCCESS) || response.Status >= int32(common.Status_BAD_REQUEST) {
 			return status.NewFromProposalResponse(r.ProposalResponse, r.Endorser)
 		}
 		if n == 0 {
-			a1 = r.ProposalResponse.GetResponse().Payload
+			a1 = r.ProposalResponse
 			continue
 		}
 
-		if bytes.Compare(a1, r.ProposalResponse.GetResponse().Payload) != 0 {
+		if !bytes.Equal(a1.Payload, r.ProposalResponse.Payload) ||
+			!bytes.Equal(a1.GetResponse().Payload, response.Payload) {
 			return status.New(status.EndorserClientStatus, status.EndorsementMismatch.ToInt32(),
 				"ProposalResponsePayloads do not match", nil)
 		}
@@ -155,11 +168,13 @@ func (c *CommitTxHandler) Handle(requestContext *RequestContext, clientContext *
 		requestContext.Response.TxValidationCode = txStatus.TxValidationCode
 
 		if txStatus.TxValidationCode != pb.TxValidationCode_VALID {
-			requestContext.Error = status.New(status.EventServerStatus, int32(txStatus.TxValidationCode), "received invalid transaction", nil)
+			requestContext.Error = status.New(status.EventServerStatus, int32(txStatus.TxValidationCode),
+				"received invalid transaction", nil)
 			return
 		}
 	case <-requestContext.Ctx.Done():
-		requestContext.Error = errors.New("Execute didn't receive block event")
+		requestContext.Error = status.New(status.ClientStatus, status.Timeout.ToInt32(),
+			"Execute didn't receive block event", nil)
 		return
 	}
 
@@ -182,11 +197,9 @@ func NewQueryHandler(next ...Handler) Handler {
 
 //NewExecuteHandler returns query handler with EndorseTxHandler, EndorsementValidationHandler & CommitTxHandler Chained
 func NewExecuteHandler(next ...Handler) Handler {
-	return NewProposalProcessorHandler(
-		NewEndorsementHandler(
-			NewEndorsementValidationHandler(
-				NewSignatureValidationHandler(NewCommitHandler(next...)),
-			),
+	return NewSelectAndEndorseHandler(
+		NewEndorsementValidationHandler(
+			NewSignatureValidationHandler(NewCommitHandler(next...)),
 		),
 	)
 }
@@ -239,7 +252,7 @@ func createAndSendTransaction(sender fab.Sender, proposal *fab.TransactionPropos
 	return transactionResponse, nil
 }
 
-func createAndSendTransactionProposal(transactor fab.Transactor, chrequest *Request, targets []fab.ProposalProcessor) ([]*fab.TransactionProposalResponse, *fab.TransactionProposal, error) {
+func createAndSendTransactionProposal(transactor fab.ProposalSender, chrequest *Request, targets []fab.ProposalProcessor) ([]*fab.TransactionProposalResponse, *fab.TransactionProposal, error) {
 	request := fab.ChaincodeInvokeRequest{
 		ChaincodeID:  chrequest.ChaincodeID,
 		Fcn:          chrequest.Fcn,
@@ -258,5 +271,6 @@ func createAndSendTransactionProposal(transactor fab.Transactor, chrequest *Requ
 	}
 
 	transactionProposalResponses, err := transactor.SendTransactionProposal(proposal, targets)
+
 	return transactionProposalResponses, proposal, err
 }

@@ -8,12 +8,16 @@ package mocks
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"time"
 
-	config "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/core/config/endpoint"
 
+	"crypto/x509"
+
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/test/mockfab"
 	"github.com/pkg/errors"
 )
 
@@ -22,129 +26,127 @@ type MockConfig struct {
 	tlsEnabled             bool
 	mutualTLSEnabled       bool
 	errorCase              bool
-	customNetworkPeerCfg   []config.NetworkPeer
-	customPeerCfg          *config.PeerConfig
-	customOrdererCfg       *config.OrdererConfig
-	customRandomOrdererCfg *config.OrdererConfig
+	customNetworkPeerCfg   []fab.NetworkPeer
+	customPeerCfg          *fab.PeerConfig
+	customOrdererCfg       *fab.OrdererConfig
+	customRandomOrdererCfg *fab.OrdererConfig
+	EvtServiceType         fab.EventServiceType
 }
 
-// NewMockConfig ...
-func NewMockConfig() config.Config {
+// NewMockCryptoConfig ...
+func NewMockCryptoConfig() core.CryptoSuiteConfig {
 	return &MockConfig{}
 }
 
-// NewMockConfigCustomized ...
-func NewMockConfigCustomized(tlsEnabled, mutualTLSEnabled, errorCase bool) config.Config {
+// NewMockEndpointConfig ...
+func NewMockEndpointConfig() fab.EndpointConfig {
+	return &MockConfig{}
+}
+
+// NewMockIdentityConfig ...
+func NewMockIdentityConfig() msp.IdentityConfig {
+	return &MockConfig{}
+}
+
+// NewMockCryptoConfigCustomized ...
+func NewMockCryptoConfigCustomized(tlsEnabled, mutualTLSEnabled, errorCase bool) core.CryptoSuiteConfig {
+	return &MockConfig{tlsEnabled: tlsEnabled, mutualTLSEnabled: mutualTLSEnabled, errorCase: errorCase}
+}
+
+// NewMockEndpointConfigCustomized ...
+func NewMockEndpointConfigCustomized(tlsEnabled, mutualTLSEnabled, errorCase bool) fab.EndpointConfig {
+	return &MockConfig{tlsEnabled: tlsEnabled, mutualTLSEnabled: mutualTLSEnabled, errorCase: errorCase}
+}
+
+// NewMockIdentityConfigCustomized ...
+func NewMockIdentityConfigCustomized(tlsEnabled, mutualTLSEnabled, errorCase bool) msp.IdentityConfig {
 	return &MockConfig{tlsEnabled: tlsEnabled, mutualTLSEnabled: mutualTLSEnabled, errorCase: errorCase}
 }
 
 // Client ...
-func (c *MockConfig) Client() (*config.ClientConfig, error) {
-	clientConfig := config.ClientConfig{}
+func (c *MockConfig) Client() *msp.ClientConfig {
+	clientConfig := msp.ClientConfig{}
 
-	clientConfig.CredentialStore = config.CredentialStoreType{
+	clientConfig.CredentialStore = msp.CredentialStoreType{
 		Path: "/tmp/fabsdkgo_test/store",
 	}
 
 	if c.mutualTLSEnabled {
-		mutualTLSCerts := config.MutualTLSConfig{
+		key := endpoint.TLSConfig{Path: "../../../test/fixtures/config/mutual_tls/client_sdk_go-key.pem"}
+		cert := endpoint.TLSConfig{Path: "../../../test/fixtures/config/mutual_tls/client_sdk_go.pem"}
 
-			Client: config.TLSKeyPair{
-				Key: endpoint.TLSConfig{
-					Path: "../../../test/fixtures/config/mutual_tls/client_sdk_go-key.pem",
-					Pem:  "",
-				},
-				Cert: endpoint.TLSConfig{
-					Path: "../../../test/fixtures/config/mutual_tls/client_sdk_go.pem",
-					Pem:  "",
-				},
-			},
+		err := key.LoadBytes()
+		if err != nil {
+			panic(err)
 		}
-		clientConfig.TLSCerts = mutualTLSCerts
+
+		err = cert.LoadBytes()
+		if err != nil {
+			panic(err)
+		}
+
+		clientConfig.TLSKey = key.Bytes()
+		clientConfig.TLSCert = cert.Bytes()
 	}
 
-	return &clientConfig, nil
+	return &clientConfig
 }
 
 // CAConfig not implemented
-func (c *MockConfig) CAConfig(org string) (*config.CAConfig, error) {
-	caConfig := config.CAConfig{
+func (c *MockConfig) CAConfig(org string) (*msp.CAConfig, bool) {
+	caConfig := msp.CAConfig{
 		CAName: "org1",
 	}
 
-	return &caConfig, nil
+	return &caConfig, true
 }
 
-//CAServerCertPems Read configuration option for the server certificate embedded pems
-func (c *MockConfig) CAServerCertPems(org string) ([]string, error) {
-	return nil, nil
+//CAServerCerts Read configuration option for the server certificates for given org
+func (c *MockConfig) CAServerCerts(org string) ([][]byte, bool) {
+	return nil, false
 }
 
-//CAServerCertPaths Read configuration option for the server certificate files
-func (c *MockConfig) CAServerCertPaths(org string) ([]string, error) {
-	return nil, nil
+//CAClientKey Read configuration option for the fabric CA client key for given org
+func (c *MockConfig) CAClientKey(org string) ([]byte, bool) {
+	return nil, false
 }
 
-//CAClientKeyPem Read configuration option for the fabric CA client key from a string
-func (c *MockConfig) CAClientKeyPem(org string) (string, error) {
-	return "", nil
-}
-
-//CAClientKeyPath Read configuration option for the fabric CA client key file
-func (c *MockConfig) CAClientKeyPath(org string) (string, error) {
-	return "", nil
-}
-
-//CAClientCertPem Read configuration option for the fabric CA client cert from a string
-func (c *MockConfig) CAClientCertPem(org string) (string, error) {
-	return "", nil
-}
-
-//CAClientCertPath Read configuration option for the fabric CA client cert file
-func (c *MockConfig) CAClientCertPath(org string) (string, error) {
-	return "", nil
-}
-
-//TimeoutOrDefault not implemented
-func (c *MockConfig) TimeoutOrDefault(arg config.TimeoutType) time.Duration {
-	return time.Second * 5
+//CAClientCert Read configuration option for the fabric CA client cert for given org
+func (c *MockConfig) CAClientCert(org string) ([]byte, bool) {
+	return nil, false
 }
 
 //Timeout not implemented
-func (c *MockConfig) Timeout(arg config.TimeoutType) time.Duration {
+func (c *MockConfig) Timeout(arg fab.TimeoutType) time.Duration {
 	return time.Second * 10
 }
 
 // PeersConfig Retrieves the fabric peers from the config file provided
-func (c *MockConfig) PeersConfig(org string) ([]config.PeerConfig, error) {
-	return nil, nil
+func (c *MockConfig) PeersConfig(org string) ([]fab.PeerConfig, bool) {
+	return nil, false
 }
 
 // PeerConfig Retrieves a specific peer from the configuration by org and name
-func (c *MockConfig) PeerConfig(org string, name string) (*config.PeerConfig, error) {
-	return nil, nil
-}
+func (c *MockConfig) PeerConfig(nameOrURL string) (*fab.PeerConfig, bool) {
 
-// PeerConfigByURL retrieves PeerConfig by URL
-func (c *MockConfig) PeerConfigByURL(url string) (*config.PeerConfig, error) {
-	if url == "invalid" {
-		return nil, errors.New("no orderer")
+	if nameOrURL == "invalid" {
+		return nil, false
 	}
 	if c.customPeerCfg != nil {
-		return c.customPeerCfg, nil
+		return c.customPeerCfg, true
 	}
-	cfg := config.PeerConfig{
+	cfg := fab.PeerConfig{
 		URL: "example.com",
 	}
-	return &cfg, nil
+	return &cfg, true
 }
 
 // TLSCACertPool ...
-func (c *MockConfig) TLSCACertPool(cert ...*x509.Certificate) (*x509.CertPool, error) {
+func (c *MockConfig) TLSCACertPool() fab.CertPool {
 	if c.errorCase {
-		return nil, errors.New("just to test error scenario")
+		return &mockfab.MockCertPool{Err: errors.New("just to test error scenario")}
 	}
-	return nil, nil
+	return &mockfab.MockCertPool{CertPool: x509.NewCertPool()}
 }
 
 // TcertBatchSize ...
@@ -169,63 +171,44 @@ func (c *MockConfig) SecurityProviderLibPath() string {
 }
 
 // OrderersConfig returns a list of defined orderers
-func (c *MockConfig) OrderersConfig() ([]config.OrdererConfig, error) {
-	oConfig, err := c.OrdererConfig("")
-
-	return []config.OrdererConfig{*oConfig}, err
-}
-
-// RandomOrdererConfig not implemented
-func (c *MockConfig) RandomOrdererConfig() (*config.OrdererConfig, error) {
-	if c.customRandomOrdererCfg != nil {
-		return c.customRandomOrdererCfg, nil
-	}
-	return nil, nil
+func (c *MockConfig) OrderersConfig() []fab.OrdererConfig {
+	oConfig, _ := c.OrdererConfig("")
+	return []fab.OrdererConfig{*oConfig}
 }
 
 //SetCustomNetworkPeerCfg sets custom orderer config for unit-tests
-func (c *MockConfig) SetCustomNetworkPeerCfg(customNetworkPeerCfg []config.NetworkPeer) {
+func (c *MockConfig) SetCustomNetworkPeerCfg(customNetworkPeerCfg []fab.NetworkPeer) {
 	c.customNetworkPeerCfg = customNetworkPeerCfg
 }
 
 //SetCustomPeerCfg sets custom orderer config for unit-tests
-func (c *MockConfig) SetCustomPeerCfg(customPeerCfg *config.PeerConfig) {
+func (c *MockConfig) SetCustomPeerCfg(customPeerCfg *fab.PeerConfig) {
 	c.customPeerCfg = customPeerCfg
 }
 
 //SetCustomOrdererCfg sets custom orderer config for unit-tests
-func (c *MockConfig) SetCustomOrdererCfg(customOrdererCfg *config.OrdererConfig) {
+func (c *MockConfig) SetCustomOrdererCfg(customOrdererCfg *fab.OrdererConfig) {
 	c.customOrdererCfg = customOrdererCfg
 }
 
 //SetCustomRandomOrdererCfg sets custom random orderer config for unit-tests
-func (c *MockConfig) SetCustomRandomOrdererCfg(customRandomOrdererCfg *config.OrdererConfig) {
+func (c *MockConfig) SetCustomRandomOrdererCfg(customRandomOrdererCfg *fab.OrdererConfig) {
 	c.customRandomOrdererCfg = customRandomOrdererCfg
 }
 
 // OrdererConfig not implemented
-func (c *MockConfig) OrdererConfig(name string) (*config.OrdererConfig, error) {
+func (c *MockConfig) OrdererConfig(name string) (*fab.OrdererConfig, bool) {
 	if name == "Invalid" {
-		return nil, errors.New("no orderer")
+		return nil, false
 	}
 	if c.customOrdererCfg != nil {
-		return c.customOrdererCfg, nil
+		return c.customOrdererCfg, true
 	}
-	oConfig := config.OrdererConfig{
+	oConfig := fab.OrdererConfig{
 		URL: "example.com",
 	}
 
-	return &oConfig, nil
-}
-
-// MSPID not implemented
-func (c *MockConfig) MSPID(org string) (string, error) {
-	return "", nil
-}
-
-// PeerMSPID not implemented
-func (c *MockConfig) PeerMSPID(name string) (string, error) {
-	return "", nil
+	return &oConfig, true
 }
 
 // KeyStorePath ...
@@ -249,47 +232,50 @@ func (c *MockConfig) CryptoConfigPath() string {
 }
 
 // NetworkConfig not implemented
-func (c *MockConfig) NetworkConfig() (*config.NetworkConfig, error) {
-	return nil, nil
+func (c *MockConfig) NetworkConfig() *fab.NetworkConfig {
+	return nil
 }
 
 // ChannelConfig returns the channel configuration
-func (c *MockConfig) ChannelConfig(name string) (*config.ChannelConfig, error) {
-	return nil, nil
+func (c *MockConfig) ChannelConfig(name string) (*fab.ChannelEndpointConfig, bool) {
+	return &fab.ChannelEndpointConfig{Policies: fab.ChannelPolicies{}}, true
 }
 
 // ChannelPeers returns the channel peers configuration
-func (c *MockConfig) ChannelPeers(name string) ([]config.ChannelPeer, error) {
-	return nil, nil
+func (c *MockConfig) ChannelPeers(name string) ([]fab.ChannelPeer, bool) {
+
+	if name == "noChannelPeers" {
+		return nil, false
+	}
+
+	peerChCfg := fab.PeerChannelConfig{EndorsingPeer: true, ChaincodeQuery: true, LedgerQuery: true, EventSource: true}
+	if name == "noEndpoints" {
+		peerChCfg = fab.PeerChannelConfig{EndorsingPeer: false, ChaincodeQuery: false, LedgerQuery: false, EventSource: false}
+	}
+
+	mockPeer := fab.ChannelPeer{PeerChannelConfig: peerChCfg, NetworkPeer: fab.NetworkPeer{PeerConfig: fab.PeerConfig{URL: "example.com"}}}
+	return []fab.ChannelPeer{mockPeer}, true
 }
 
 // ChannelOrderers returns a list of channel orderers
-func (c *MockConfig) ChannelOrderers(name string) ([]config.OrdererConfig, error) {
+func (c *MockConfig) ChannelOrderers(name string) ([]fab.OrdererConfig, bool) {
 	if name == "Invalid" {
-		return nil, errors.New("no orderer")
+		return nil, false
 	}
 
-	oConfig, err := c.OrdererConfig("")
+	oConfig, _ := c.OrdererConfig("")
 
-	return []config.OrdererConfig{*oConfig}, err
+	return []fab.OrdererConfig{*oConfig}, true
 }
 
 // NetworkPeers returns the mock network peers configuration
-func (c *MockConfig) NetworkPeers() ([]config.NetworkPeer, error) {
-	if c.customNetworkPeerCfg != nil {
-		return c.customNetworkPeerCfg, nil
-	}
-	return nil, errors.New("no config")
-}
-
-// Ephemeral flag
-func (c *MockConfig) Ephemeral() bool {
-	return false
+func (c *MockConfig) NetworkPeers() []fab.NetworkPeer {
+	return c.customNetworkPeerCfg
 }
 
 // SecurityProvider ...
 func (c *MockConfig) SecurityProvider() string {
-	return "SW"
+	return "sw"
 }
 
 // SecurityProviderLabel ...
@@ -313,11 +299,23 @@ func (c *MockConfig) IsSecurityEnabled() bool {
 }
 
 // TLSClientCerts ...
-func (c *MockConfig) TLSClientCerts() ([]tls.Certificate, error) {
-	return nil, nil
+func (c *MockConfig) TLSClientCerts() []tls.Certificate {
+	return nil
 }
 
 // EventServiceType returns the type of event service client to use
-func (c *MockConfig) EventServiceType() config.EventServiceType {
-	return config.DeliverEventServiceType
+func (c *MockConfig) EventServiceType() fab.EventServiceType {
+	return c.EvtServiceType
+}
+
+// Lookup gets the Value from config file by Key
+func (c *MockConfig) Lookup(key string) (interface{}, bool) {
+	if key == "invalid" {
+		return nil, false
+	}
+	value, ok := c.Lookup(key)
+	if !ok {
+		return nil, false
+	}
+	return value, true
 }

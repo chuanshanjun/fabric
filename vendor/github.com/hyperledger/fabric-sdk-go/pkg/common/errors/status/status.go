@@ -7,6 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 // Package status defines metadata for errors returned by fabric-sdk-go. This
 // information may be used by SDK users to make decisions about how to handle
 // certain error conditions.
+// Status codes are divided by group, where each group represents a particular
+// component and the codes correspond to those returned by the component.
+// These are defined in detail below.
 package status
 
 import (
@@ -14,7 +17,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/hyperledger/fabric-sdk-go/pkg/util/errors/multi"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/multi"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -72,20 +75,32 @@ const (
 	OrdererClientStatus
 	// ClientStatus is a generic client status
 	ClientStatus
+
+	// ChaincodeStatus defines the status codes returned by chaincode
+	ChaincodeStatus
+
+	// DiscoveryServerStatus status returned by the Discovery Server
+	DiscoveryServerStatus
+
+	// TestStatus is used by tests to create retry codes.
+	TestStatus
 )
 
 // GroupName maps the groups in this packages to human-readable strings
 var GroupName = map[int32]string{
-	0: "Unknown",
-	1: "gRPC Transport Status",
-	2: "HTTP Transport Status",
-	3: "Endorser Server Status",
-	4: "Event Server Status",
-	5: "Orderer Server Status",
-	6: "Fabric CA Server Status",
-	7: "Endorser Client Status",
-	8: "Orderer Client Status",
-	9: "Client Status",
+	0:  "Unknown",
+	1:  "gRPC Transport Status",
+	2:  "HTTP Transport Status",
+	3:  "Endorser Server Status",
+	4:  "Event Server Status",
+	5:  "Orderer Server Status",
+	6:  "Fabric CA Server Status",
+	7:  "Endorser Client Status",
+	8:  "Orderer Client Status",
+	9:  "Client Status",
+	10: "Chaincode status",
+	11: "Discovery status",
+	12: "Test status",
 }
 
 func (g Group) String() string {
@@ -109,7 +124,12 @@ func FromError(err error) (s *Status, ok bool) {
 		return s, true
 	}
 	if m, ok := unwrappedErr.(multi.Errors); ok {
-		return New(ClientStatus, MultipleErrors.ToInt32(), m.Error(), nil), true
+		// Return all of the errors in the details
+		var errors []interface{}
+		for _, err := range m {
+			errors = append(errors, err)
+		}
+		return New(ClientStatus, MultipleErrors.ToInt32(), m.Error(), errors), true
 	}
 
 	return nil, false
@@ -161,4 +181,10 @@ func NewFromGRPCStatus(s *grpcstatus.Status) *Status {
 
 	return &Status{Group: GRPCTransportStatus, Code: s.Proto().Code,
 		Message: s.Message(), Details: details}
+}
+
+// NewFromExtractedChaincodeError returns Status when a chaincode error occurs
+func NewFromExtractedChaincodeError(code int, message string) *Status {
+	return &Status{Group: ChaincodeStatus, Code: int32(code),
+		Message: message, Details: nil}
 }

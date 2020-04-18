@@ -27,13 +27,34 @@ type ChannelConfig interface {
 	Query(reqCtx reqContext.Context) (ChannelCfg, error)
 }
 
+// ConfigGroupKey is the config group key
+type ConfigGroupKey string
+
+const (
+	// ChannelGroupKey is the Channel config group key
+	ChannelGroupKey ConfigGroupKey = ""
+	// OrdererGroupKey is the Orderer config group key
+	OrdererGroupKey ConfigGroupKey = "Orderer"
+	// ApplicationGroupKey is the Application config group key
+	ApplicationGroupKey ConfigGroupKey = "Application"
+)
+
+const (
+	// V1_1Capability indicates that Fabric 1.1 features are supported
+	V1_1Capability = "V1_1"
+	// V1_2Capability indicates that Fabric 1.2 features are supported
+	V1_2Capability = "V1_2"
+)
+
 // ChannelCfg contains channel configuration
 type ChannelCfg interface {
 	ID() string
+	BlockNumber() uint64
 	MSPs() []*mspCfg.MSPConfig
 	AnchorPeers() []*OrgAnchorPeer
 	Orderers() []string
 	Versions() *Versions
+	HasCapability(group ConfigGroupKey, capability string) bool
 }
 
 // ChannelMembership helps identify a channel's members
@@ -54,6 +75,6 @@ type Versions struct {
 // BlockchainInfoResponse wraps blockchain info with endorser info
 type BlockchainInfoResponse struct {
 	BCI      *common.BlockchainInfo
-	Endorser string
+	Endorser string // peer节点
 	Status   int32
 }

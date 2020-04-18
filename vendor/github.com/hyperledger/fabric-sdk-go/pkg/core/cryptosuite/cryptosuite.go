@@ -47,11 +47,11 @@ func GetDefault() core.CryptoSuite {
 	// Use SW as the default cryptosuite when not initialized properly - should be for testing only
 	s, err := sw.GetSuiteWithDefaultEphemeral()
 	if err != nil {
-		logger.Panicf("Could not initialize default cryptosuite: %v", err)
+		logger.Panicf("Could not initialize default cryptosuite: %s", err)
 	}
 	err = initSuite(s)
 	if err != nil {
-		logger.Panicf("Could not set default cryptosuite: %v", err)
+		logger.Panicf("Could not set default cryptosuite: %s", err)
 	}
 
 	return defaultCryptoSuite
@@ -65,6 +65,12 @@ func SetDefault(newDefaultSuite core.CryptoSuite) error {
 		return errors.New("default crypto suite is already set")
 	}
 	return initSuite(newDefaultSuite)
+}
+
+// DefaultInitialized returns true if a default suite has already been
+// set.
+func DefaultInitialized() bool {
+	return atomic.LoadInt32(&initialized) > 0
 }
 
 //GetSHA256Opts returns options relating to SHA-256.

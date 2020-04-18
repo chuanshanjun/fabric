@@ -50,7 +50,7 @@ services:
       # cc与peer节点使用同一个网络 将chaincode的网络与peer节点的网络绑定到一起，如果不设置这个参数的话，链码可能连不上peer节点
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=deploy_default
     working_dir: /opt/gopath/src/github.com/hyperledger/fabric
-    # command: peer node start
+#    command: peer node start
     command: peer node start --peer-chaincodedev=true # 使用dev模式启动链码
 
   # 针对5个peer节点做不同的配置

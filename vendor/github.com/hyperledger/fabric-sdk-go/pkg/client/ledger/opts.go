@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
-	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fab/comm"
 	"github.com/pkg/errors"
 )
 
@@ -38,33 +37,40 @@ type RequestOption func(ctx context.Client, opts *requestOptions) error
 
 //requestOptions contains options for operations performed by LedgerClient
 type requestOptions struct {
-	Targets       []fab.Peer                         // target peers
-	TargetFilter  fab.TargetFilter                   // target filter
-	MaxTargets    int                                // maximum number of targets to select
-	MinTargets    int                                // min number of targets that have to respond with no error (or agree on result)
-	Timeouts      map[core.TimeoutType]time.Duration //timeout options for ledger query operations
-	ParentContext reqContext.Context                 //parent grpc context for ledger operations
+	Targets       []fab.Peer                        // target peers
+	TargetFilter  fab.TargetFilter                  // target filter
+	MaxTargets    int                               // maximum number of targets to select
+	MinTargets    int                               // min number of targets that have to respond with no error (or agree on result)
+	Timeouts      map[fab.TimeoutType]time.Duration //timeout options for ledger query operations
+	ParentContext reqContext.Context                //parent grpc context for ledger operations
 }
 
-//WithTargets encapsulates fab.Peer targets to ledger RequestOption
+//WithTargets allows for overriding of the target peers per request.
 func WithTargets(targets ...fab.Peer) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
+
+		// Validate targets
+		for _, t := range targets {
+			if t == nil {
+				return errors.New("target is nil")
+			}
+		}
+
 		opts.Targets = targets
 		return nil
 	}
 }
 
-// WithTargetURLs allows overriding of the target peers for the request.
-// Targets are specified by URL, and the SDK will create the underlying peer
-// objects.
-func WithTargetURLs(urls ...string) RequestOption {
+// WithTargetEndpoints allows overriding of the target peers per request.
+// Targets are specified by name or URL, and the SDK will create the underlying peer objects.
+func WithTargetEndpoints(keys ...string) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
 
 		var targets []fab.Peer
 
-		for _, url := range urls {
+		for _, url := range keys {
 
-			peerCfg, err := config.NetworkPeerConfigFromURL(ctx.Config(), url)
+			peerCfg, err := comm.NetworkPeerConfig(ctx.EndpointConfig(), url)
 			if err != nil {
 				return err
 			}
@@ -81,7 +87,7 @@ func WithTargetURLs(urls ...string) RequestOption {
 	}
 }
 
-//WithTargetFilter encapsulates TargetFilter targets to ledger RequestOption
+// WithTargetFilter specifies a per-request target peer-filter.
 func WithTargetFilter(targetFilter fab.TargetFilter) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
 		opts.TargetFilter = targetFilter
@@ -89,7 +95,8 @@ func WithTargetFilter(targetFilter fab.TargetFilter) RequestOption {
 	}
 }
 
-//WithMaxTargets encapsulates max targets to ledger RequestOption
+//WithMaxTargets specifies maximum number of targets to select per request.
+// Default value for maximum number of targets is 1.
 func WithMaxTargets(maxTargets int) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
 		opts.MaxTargets = maxTargets
@@ -97,7 +104,8 @@ func WithMaxTargets(maxTargets int) RequestOption {
 	}
 }
 
-//WithMinTargets encapsulates min targets to ledger RequestOption
+//WithMinTargets specifies minimum number of targets that have to respond with no error (or agree on result).
+// Default value for minimum number of targets is 1.
 func WithMinTargets(minTargets int) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
 		opts.MinTargets = minTargets
@@ -106,18 +114,18 @@ func WithMinTargets(minTargets int) RequestOption {
 }
 
 //WithTimeout encapsulates key value pairs of timeout type, timeout duration to Options
-//for QueryInfo,QueryBlockByHash,QueryBlock,QueryTransaction,QueryConfig functions
-func WithTimeout(timeoutType core.TimeoutType, timeout time.Duration) RequestOption {
+//for QueryInfo, QueryBlock, QueryBlockByHash,  QueryBlockByTxID, QueryTransaction, QueryConfig functions
+func WithTimeout(timeoutType fab.TimeoutType, timeout time.Duration) RequestOption {
 	return func(ctx context.Client, o *requestOptions) error {
 		if o.Timeouts == nil {
-			o.Timeouts = make(map[core.TimeoutType]time.Duration)
+			o.Timeouts = make(map[fab.TimeoutType]time.Duration)
 		}
 		o.Timeouts[timeoutType] = timeout
 		return nil
 	}
 }
 
-//WithParentContext encapsulates grpc context parent to Options
+//WithParentContext encapsulates grpc parent context
 func WithParentContext(parentContext reqContext.Context) RequestOption {
 	return func(ctx context.Client, o *requestOptions) error {
 		o.ParentContext = parentContext

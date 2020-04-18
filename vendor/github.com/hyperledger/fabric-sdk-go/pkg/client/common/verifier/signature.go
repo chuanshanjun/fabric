@@ -8,6 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 package verifier
 
 import (
+	"crypto/x509"
+	"time"
+
+	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric/bccsp/utils"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/status"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
@@ -15,7 +19,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-var logger = logging.NewLogger("fabsdk/client")
+const loggerModule = "fabsdk/client"
+
+var logger = logging.NewLogger(loggerModule)
 
 // Signature verifies response signature
 type Signature struct {
@@ -25,7 +31,7 @@ type Signature struct {
 // Verify checks transaction proposal response
 func (v *Signature) Verify(response *fab.TransactionProposalResponse) error {
 
-	if response.ProposalResponse.GetResponse().Status != int32(common.Status_SUCCESS) {
+	if response.ProposalResponse.GetResponse().Status < int32(common.Status_SUCCESS) || response.ProposalResponse.GetResponse().Status >= int32(common.Status_BAD_REQUEST) {
 		return status.NewFromProposalResponse(response.ProposalResponse, response.Endorser)
 	}
 
@@ -55,5 +61,49 @@ func (v *Signature) Verify(response *fab.TransactionProposalResponse) error {
 
 // Match matches transaction proposal responses (empty for signature verifier)
 func (v *Signature) Match(response []*fab.TransactionProposalResponse) error {
+	return nil
+}
+
+//ValidateCertificateDates used to verify if certificate was expired or not valid until later date
+func ValidateCertificateDates(cert *x509.Certificate) error {
+	if cert == nil {
+		return nil
+	}
+	if time.Now().UTC().Before(cert.NotBefore) {
+		return errors.New("Certificate provided is not valid until later date")
+	}
+
+	if time.Now().UTC().After(cert.NotAfter) {
+		return errors.New("Certificate provided has expired")
+	}
+	return nil
+}
+
+//VerifyPeerCertificate verifies raw certs and chain certs for expiry and not yet valid dates
+func VerifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+	for _, chaincert := range rawCerts {
+		cert, err := utils.DERToX509Certificate(chaincert)
+		if err != nil {
+			logger.Warn("Got error while verifying cert")
+		}
+		if cert != nil {
+			err = ValidateCertificateDates(cert)
+			if err != nil {
+				//cert is expired or not valid
+				logger.Warn(err.Error())
+				return err
+			}
+		}
+	}
+	for _, certs := range verifiedChains {
+		for _, cert := range certs {
+			err := ValidateCertificateDates(cert)
+			if err != nil {
+				//cert is expired or not valid
+				logger.Warn(err.Error())
+				return err
+			}
+		}
+	}
 	return nil
 }

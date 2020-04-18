@@ -37,10 +37,10 @@ func (l *CallerInfo) HideCallerInfo(module string, level api.Level) {
 //IsCallerInfoEnabled returns if callerinfo enabled for given module and level
 func (l *CallerInfo) IsCallerInfoEnabled(module string, level api.Level) bool {
 	showcaller, exists := l.showcaller[callerInfoKey{module, level}]
-	if exists == false {
+	if !exists {
 		//If no callerinfo setting exists, then look for default
 		showcaller, exists = l.showcaller[callerInfoKey{"", level}]
-		if exists == false {
+		if !exists {
 			return true
 		}
 	}
@@ -50,10 +50,10 @@ func (l *CallerInfo) IsCallerInfoEnabled(module string, level api.Level) bool {
 //getDefaultCallerInfoSetting default setting for callerinfo
 func (l *CallerInfo) getDefaultCallerInfoSetting() map[callerInfoKey]bool {
 	return map[callerInfoKey]bool{
-		callerInfoKey{"", api.CRITICAL}: true,
-		callerInfoKey{"", api.ERROR}:    true,
-		callerInfoKey{"", api.WARNING}:  true,
-		callerInfoKey{"", api.INFO}:     true,
-		callerInfoKey{"", api.DEBUG}:    true,
+		{"", api.CRITICAL}: true,
+		{"", api.ERROR}:    true,
+		{"", api.WARNING}:  true,
+		{"", api.INFO}:     true,
+		{"", api.DEBUG}:    true,
 	}
 }

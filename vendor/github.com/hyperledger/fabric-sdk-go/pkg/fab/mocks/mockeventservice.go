@@ -7,13 +7,18 @@ SPDX-License-Identifier: Apache-2.0
 package mocks
 
 import (
+	"time"
+
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/events/service/dispatcher"
+	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 )
 
 // MockEventService implements a mock event service
 type MockEventService struct {
-	TxStatusRegCh chan *dispatcher.TxStatusReg
+	TxStatusRegCh    chan *dispatcher.TxStatusReg
+	TxValidationCode pb.TxValidationCode
+	Timeout          bool
 }
 
 // NewMockEventService returns a new mock event service
@@ -25,17 +30,31 @@ func NewMockEventService() *MockEventService {
 
 // RegisterBlockEvent registers for block events.
 func (m *MockEventService) RegisterBlockEvent(filter ...fab.BlockFilter) (fab.Registration, <-chan *fab.BlockEvent, error) {
-	panic("not implemented")
+	eventCh := make(chan *fab.BlockEvent)
+	reg := &dispatcher.BlockReg{
+		Eventch: eventCh,
+	}
+	return reg, eventCh, nil
 }
 
 // RegisterFilteredBlockEvent registers for filtered block events.
 func (m *MockEventService) RegisterFilteredBlockEvent() (fab.Registration, <-chan *fab.FilteredBlockEvent, error) {
-	panic("not implemented")
+	eventCh := make(chan *fab.FilteredBlockEvent)
+	reg := &dispatcher.FilteredBlockReg{
+		Eventch: eventCh,
+	}
+	return reg, eventCh, nil
 }
 
 // RegisterChaincodeEvent registers for chaincode events.
 func (m *MockEventService) RegisterChaincodeEvent(ccID, eventFilter string) (fab.Registration, <-chan *fab.CCEvent, error) {
-	panic("not implemented")
+	eventCh := make(chan *fab.CCEvent)
+	reg := &dispatcher.ChaincodeReg{
+		Eventch:     eventCh,
+		ChaincodeID: ccID,
+		EventFilter: eventFilter,
+	}
+	return reg, eventCh, nil
 }
 
 // RegisterTxStatusEvent registers for transaction status events.
@@ -46,6 +65,20 @@ func (m *MockEventService) RegisterTxStatusEvent(txID string) (fab.Registration,
 		TxID:    txID,
 	}
 	m.TxStatusRegCh <- reg
+
+	if !m.Timeout {
+
+		go func() {
+			select {
+			case txStatusReg := <-m.TxStatusRegCh:
+				txStatusReg.Eventch <- &fab.TxStatusEvent{TxID: txStatusReg.TxID, TxValidationCode: m.TxValidationCode}
+			case <-time.After(5 * time.Second):
+				panic("time out not expected")
+			}
+		}()
+
+	}
+
 	return reg, eventCh, nil
 }
 

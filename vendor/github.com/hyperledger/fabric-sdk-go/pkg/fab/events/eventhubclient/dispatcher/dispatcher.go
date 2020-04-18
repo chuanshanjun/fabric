@@ -13,6 +13,7 @@ import (
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/events/api"
 	clientdisp "github.com/hyperledger/fabric-sdk-go/pkg/fab/events/client/dispatcher"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fab/events/eventhubclient/connection"
 	esdispatcher "github.com/hyperledger/fabric-sdk-go/pkg/fab/events/service/dispatcher"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 	"github.com/pkg/errors"
@@ -35,9 +36,9 @@ type Dispatcher struct {
 }
 
 // New creates a new event hub dispatcher
-func New(context fabcontext.Client, chConfig fab.ChannelCfg, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
+func New(context fabcontext.Client, chConfig fab.ChannelCfg, discovery fab.DiscoveryService, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
 	return &Dispatcher{
-		Dispatcher: *clientdisp.New(context, chConfig, connectionProvider, opts...),
+		Dispatcher: *clientdisp.New(context, chConfig, discovery, connectionProvider, opts...),
 	}
 }
 
@@ -58,7 +59,7 @@ func (ed *Dispatcher) handleRegInterestsEvent(e esdispatcher.Event) {
 	evt := e.(*RegisterInterestsEvent)
 
 	if ed.Connection() == nil {
-		logger.Warnf("Unable to register interests since no connection was established.")
+		logger.Warn("Unable to register interests since no connection was established.")
 		return
 	}
 
@@ -82,7 +83,7 @@ func (ed *Dispatcher) handleUnregInterestsEvent(e esdispatcher.Event) {
 	evt := e.(*UnregisterInterestsEvent)
 
 	if ed.Connection() == nil {
-		logger.Warnf("Unable to unregister interests since no connection was established.")
+		logger.Warn("Unable to unregister interests since no connection was established.")
 		return
 	}
 
@@ -139,7 +140,7 @@ func (ed *Dispatcher) handleUnregInterestsResponse(e *pb.Event_Unregister) {
 
 func validateInterests(have []*pb.Interest, want []*pb.Interest) error {
 	if len(have) != len(want) {
-		return errors.New("all interests were not registered/unregistered")
+		return errors.Errorf("all interests were not registered/unregistered have: [%+v]\nwant:[%+v]", have, want)
 	}
 	for _, hi := range have {
 		found := false
@@ -157,15 +158,13 @@ func validateInterests(have []*pb.Interest, want []*pb.Interest) error {
 }
 
 func (ed *Dispatcher) handleEvent(e esdispatcher.Event) {
-	event := e.(*pb.Event)
-
-	logger.Debugf("Handling event: %#v", event)
-
+	ehevent := e.(*connection.Event)
+	event := ehevent.Event.(*pb.Event)
 	switch evt := event.Event.(type) {
 	case *pb.Event_Block:
-		ed.HandleBlock(evt.Block)
+		ed.HandleBlock(evt.Block, ehevent.SourceURL)
 	case *pb.Event_FilteredBlock:
-		ed.HandleFilteredBlock(evt.FilteredBlock)
+		ed.HandleFilteredBlock(evt.FilteredBlock, ehevent.SourceURL)
 	case *pb.Event_Register:
 		ed.handleRegInterestsResponse(evt)
 	case *pb.Event_Unregister:
@@ -191,5 +190,5 @@ func (ed *Dispatcher) registerHandlers() {
 	// Register Handlers
 	ed.RegisterHandler(&RegisterInterestsEvent{}, ed.handleRegInterestsEvent)
 	ed.RegisterHandler(&UnregisterInterestsEvent{}, ed.handleUnregInterestsEvent)
-	ed.RegisterHandler(&pb.Event{}, ed.handleEvent)
+	ed.RegisterHandler(&connection.Event{}, ed.handleEvent)
 }

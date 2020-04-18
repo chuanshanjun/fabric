@@ -80,8 +80,8 @@ func (f *Value) MustGet() interface{} {
 
 // IsSet returns true if the value has been set, otherwise false is returned
 func (f *Value) IsSet() bool {
-	isSet, _, _ := f.get()
-	return isSet
+	p := atomic.LoadPointer(&f.ref)
+	return p != nil
 }
 
 func (f *Value) get() (bool, interface{}, error) {
@@ -98,5 +98,5 @@ func (f *Value) set(value interface{}, err error) {
 		value: value,
 		err:   err,
 	}
-	atomic.StorePointer(&f.ref, unsafe.Pointer(holder))
+	atomic.StorePointer(&f.ref, unsafe.Pointer(holder)) //nolint
 }

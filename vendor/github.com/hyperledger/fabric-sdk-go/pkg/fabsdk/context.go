@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package fabsdk
 
 import (
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
 	"github.com/pkg/errors"
 )
@@ -50,19 +49,14 @@ func WithOrg(org string) ContextOption {
 var ErrAnonymousIdentity = errors.New("missing credentials")
 
 func (sdk *FabricSDK) newIdentity(options ...ContextOption) (msp.SigningIdentity, error) {
-	clientConfig, err := sdk.Config().Client()
-	if err != nil {
-		return nil, errors.WithMessage(err, "retrieving client configuration failed")
-	}
-
 	opts := identityOptions{
-		orgName: clientConfig.Organization,
+		orgName: sdk.provider.IdentityConfig().Client().Organization,
 	}
 
 	for _, option := range options {
-		err := option(&opts)
-		if err != nil {
-			return nil, errors.WithMessage(err, "error in option passed to create identity")
+		err1 := option(&opts)
+		if err1 != nil {
+			return nil, errors.WithMessage(err1, "error in option passed to create identity")
 		}
 	}
 
@@ -89,19 +83,4 @@ func (sdk *FabricSDK) newIdentity(options ...ContextOption) (msp.SigningIdentity
 	}
 
 	return user, nil
-}
-
-// session represents an identity being used with clients along with services
-// that associate with that identity (particularly the channel service).
-type session struct {
-	msp.Identity
-}
-
-// newSession creates a session from a context and a user (TODO)
-func newSession(ic msp.Identity, cp fab.ChannelProvider) *session {
-	s := session{
-		Identity: ic,
-	}
-
-	return &s
 }

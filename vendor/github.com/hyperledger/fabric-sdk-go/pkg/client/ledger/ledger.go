@@ -4,7 +4,15 @@ Copyright SecureKey Technologies Inc. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package ledger enables ability to query ledger in a Fabric network.
+// Package ledger enables ledger queries on specified channel on a Fabric network.
+// An application that requires ledger queries from multiple channels should create a separate
+// instance of the ledger client for each channel. Ledger client supports the following queries:
+// QueryInfo, QueryBlock, QueryBlockByHash,  QueryBlockByTxID, QueryTransaction and QueryConfig.
+//
+//  Basic Flow:
+//  1) Prepare channel context
+//  2) Create ledger client
+//  3) Query ledger
 package ledger
 
 import (
@@ -14,6 +22,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/discovery"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/filter"
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/verifier"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/status"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
@@ -23,25 +33,18 @@ import (
 	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	contextImpl "github.com/hyperledger/fabric-sdk-go/pkg/context"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/channel"
 	"github.com/pkg/errors"
 )
 
-var logger = logging.NewLogger("fabsdk/client")
-
 // Client enables ledger queries on a Fabric network.
-//
-// A ledger client instance provides a handler to query various info on specified channel.
-// An application that requires interaction with multiple channels should create a separate
-// instance of the ledger client for each channel. Ledger client supports specific queries only.
 type Client struct {
-	ctx      context.Channel
-	filter   fab.TargetFilter
-	ledger   *channel.Ledger
-	verifier *verifier.Signature
+	ctx       context.Channel
+	filter    fab.TargetFilter
+	ledger    *channel.Ledger
+	verifier  channel.ResponseVerifier
+	discovery fab.DiscoveryService
 }
 
 // mspFilter is default filter
@@ -54,7 +57,9 @@ func (f *mspFilter) Accept(peer fab.Peer) bool {
 	return peer.MSPID() == f.mspID
 }
 
-// New returns a Client instance.
+// New returns a ledger client instance. A ledger client instance provides a handler to query various info on specified channel.
+// An application that requires interaction with multiple channels should create a separate
+// instance of the ledger client for each channel. Ledger client supports specific queries only.
 func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client, error) {
 
 	channelContext, err := channelProvider()
@@ -76,10 +81,21 @@ func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client
 		return nil, err
 	}
 
+	ledgerFilter := filter.NewEndpointFilter(channelContext, filter.LedgerQuery)
+
+	discoveryService, err := channelContext.ChannelService().Discovery()
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply filter to discovery service
+	discovery := discovery.NewDiscoveryFilterService(discoveryService, ledgerFilter)
+
 	ledgerClient := Client{
-		ctx:      channelContext,
-		ledger:   ledger,
-		verifier: &verifier.Signature{Membership: membership},
+		ctx:       channelContext,
+		ledger:    ledger,
+		verifier:  &verifier.Signature{Membership: membership},
+		discovery: discovery,
 	}
 
 	for _, opt := range opts {
@@ -102,31 +118,28 @@ func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client
 	return &ledgerClient, nil
 }
 
-// QueryInfo queries for various useful information on the state of the channel
-// (height, known peers).
+// QueryInfo queries for various useful blockchain information on this channel such as block height and current block hash.
+//  Parameters:
+//  options are optional request options
+//
+//  Returns:
+//  blockchain information
 func (c *Client) QueryInfo(options ...RequestOption) (*fab.BlockchainInfoResponse, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryInfo")
+		return nil, errors.WithMessage(err, "QueryInfo failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryInfo")
-	}
-
-	reqCtx, cancel := c.createRequestContext(&opts)
+	reqCtx, cancel := c.createRequestContext(opts)
 	defer cancel()
 
 	responses, err := c.ledger.QueryInfo(reqCtx, peersToTxnProcessors(targets), c.verifier)
 	if err != nil && len(responses) == 0 {
-		return nil, errors.WithMessage(err, "Failed to QueryInfo")
+		return nil, errors.WithMessage(err, "QueryInfo failed")
 	}
 
 	if len(responses) < opts.MinTargets {
-		return nil, errors.Errorf("Number of responses %d is less than MinTargets %d. Targets: %v, Error: %v", len(responses), opts.MinTargets, targets, err)
+		return nil, errors.Errorf("Number of responses %d is less than MinTargets %d. Targets: %v, Error: %s", len(responses), opts.MinTargets, targets, err)
 	}
 
 	response := responses[0]
@@ -144,122 +157,98 @@ func (c *Client) QueryInfo(options ...RequestOption) (*fab.BlockchainInfoRespons
 
 	}
 
-	return response, err
+	return response, nil
 }
 
-// QueryBlockByHash queries the ledger for Block by block hash.
-// This query will be made to specified targets.
-// Returns the block.
+// QueryBlockByHash queries the ledger for block by block hash.
+//  Parameters:
+//  blockHash is required block hash
+//  options hold optional request options
+//
+//  Returns:
+//  block information
 func (c *Client) QueryBlockByHash(blockHash []byte, options ...RequestOption) (*common.Block, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryBlockByHash")
+		return nil, errors.WithMessage(err, "QueryBlockByHash failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryBlockByHash")
-	}
-
-	reqCtx, cancel := c.createRequestContext(&opts)
+	reqCtx, cancel := c.createRequestContext(opts)
 	defer cancel()
 
 	responses, err := c.ledger.QueryBlockByHash(reqCtx, blockHash, peersToTxnProcessors(targets), c.verifier)
 	if err != nil && len(responses) == 0 {
-		return nil, errors.WithMessage(err, "Failed to QueryBlockByHash")
+		return nil, errors.WithMessage(err, "QueryBlockByHash failed")
 	}
 
-	if len(responses) < opts.MinTargets {
-		return nil, errors.Errorf("QueryBlockByHash: Number of responses %d is less than MinTargets %d", len(responses), opts.MinTargets)
-	}
-
-	response := responses[0]
-	for i, r := range responses {
-		if i == 0 {
-			continue
-		}
-
-		// All payloads have to match
-		if !proto.Equal(response.Data, r.Data) {
-			return nil, errors.New("Payloads for QueryBlockByHash do not match")
-		}
-	}
-
-	return response, err
+	return matchBlockData(responses, opts.MinTargets)
 }
 
-// QueryBlockByTxID returns a block which contains a transaction
-// This query will be made to specified targets.
-// Returns the block.
+// QueryBlockByTxID queries for block which contains a transaction.
+//  Parameters:
+//  txID is required transaction ID
+//  options hold optional request options
+//
+//  Returns:
+//  block information
 func (c *Client) QueryBlockByTxID(txID fab.TransactionID, options ...RequestOption) (*common.Block, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryBlockByTxID")
+		return nil, errors.WithMessage(err, "QueryBlockByTxID failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryBlockByTxID")
-	}
-
-	reqCtx, cancel := c.createRequestContext(&opts)
+	reqCtx, cancel := c.createRequestContext(opts)
 	defer cancel()
 
 	responses, err := c.ledger.QueryBlockByTxID(reqCtx, txID, peersToTxnProcessors(targets), c.verifier)
 	if err != nil && len(responses) == 0 {
-		return nil, errors.WithMessage(err, "Failed to QueryBlockByTxID")
+		return nil, errors.WithMessage(err, "QueryBlockByTxID failed")
 	}
 
-	if len(responses) < opts.MinTargets {
-		return nil, errors.Errorf("QueryBlockByTxID: Number of responses %d is less than MinTargets %d", len(responses), opts.MinTargets)
-	}
-
-	response := responses[0]
-	for i, r := range responses {
-		if i == 0 {
-			continue
-		}
-
-		// All payloads have to match
-		if !proto.Equal(response.Data, r.Data) {
-			return nil, errors.New("Payloads for QueryBlockByTxID do not match")
-		}
-	}
-
-	return response, err
+	return matchBlockData(responses, opts.MinTargets)
 }
 
 // QueryBlock queries the ledger for Block by block number.
-// This query will be made to specified targets.
-// blockNumber: The number which is the ID of the Block.
-// It returns the block.
+//  Parameters:
+//  blockNumber is required block number(ID)
+//  options hold optional request options
+//
+//  Returns:
+//  block information
 func (c *Client) QueryBlock(blockNumber uint64, options ...RequestOption) (*common.Block, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryBlock")
+		return nil, errors.WithMessage(err, "QueryBlock failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryBlock")
-	}
-
-	reqCtx, cancel := c.createRequestContext(&opts)
+	reqCtx, cancel := c.createRequestContext(opts)
 	defer cancel()
 
 	responses, err := c.ledger.QueryBlock(reqCtx, blockNumber, peersToTxnProcessors(targets), c.verifier)
 	if err != nil && len(responses) == 0 {
-		return nil, errors.WithMessage(err, "Failed to QueryBlock")
+		return nil, errors.WithMessage(err, "QueryBlock failed")
 	}
 
-	if len(responses) < opts.MinTargets {
-		return nil, errors.Errorf("QueryBlock: Number of responses %d is less than MinTargets %d", len(responses), opts.MinTargets)
+	return matchBlockData(responses, opts.MinTargets)
+}
+
+func (c *Client) prepareRequestParams(options ...RequestOption) ([]fab.Peer, *requestOptions, error) {
+	opts, err := c.prepareRequestOpts(options...)
+	if err != nil {
+		return nil, nil, errors.WithMessage(err, "failed to get opts")
+	}
+
+	targets, err := c.calculateTargets(opts)
+	if err != nil {
+		return nil, nil, errors.WithMessage(err, "failed to determine target peers")
+	}
+
+	return targets, &opts, nil
+}
+
+func matchBlockData(responses []*common.Block, minTargets int) (*common.Block, error) {
+	if len(responses) < minTargets {
+		return nil, errors.Errorf("Number of responses %d is less than MinTargets %d", len(responses), minTargets)
 	}
 
 	response := responses[0]
@@ -268,37 +257,35 @@ func (c *Client) QueryBlock(blockNumber uint64, options ...RequestOption) (*comm
 			continue
 		}
 
-		// All payloads have to match
+		// Block data has to match
 		if !proto.Equal(response.Data, r.Data) {
-			return nil, errors.New("Payloads for QueryBlock do not match")
+			return nil, errors.New("Block data does not match")
 		}
 	}
 
-	return response, err
+	return response, nil
+
 }
 
-// QueryTransaction queries the ledger for Transaction by number.
-// This query will be made to specified targets.
-// Returns the ProcessedTransaction information containing the transaction.
+// QueryTransaction queries the ledger for processed transaction by transaction ID.
+//  Parameters:
+//  txID is required transaction ID
+//  options hold optional request options
+//
+//  Returns:
+//  processed transaction information
 func (c *Client) QueryTransaction(transactionID fab.TransactionID, options ...RequestOption) (*pb.ProcessedTransaction, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryTransaction")
+		return nil, errors.WithMessage(err, "QueryTransaction failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryTransaction")
-	}
-
-	reqCtx, cancel := c.createRequestContext(&opts)
+	reqCtx, cancel := c.createRequestContext(opts)
 	defer cancel()
 
 	responses, err := c.ledger.QueryTransaction(reqCtx, transactionID, peersToTxnProcessors(targets), c.verifier)
 	if err != nil && len(responses) == 0 {
-		return nil, errors.WithMessage(err, "Failed to QueryTransaction")
+		return nil, errors.WithMessage(err, "QueryTransaction failed")
 	}
 
 	if len(responses) < opts.MinTargets {
@@ -313,37 +300,34 @@ func (c *Client) QueryTransaction(transactionID fab.TransactionID, options ...Re
 
 		// All payloads have to match
 		if !proto.Equal(response, r) {
-			return nil, errors.New("Payloads for QueryBlockByHash do not match")
+			return nil, errors.New("Payloads for QueryTransaction do not match")
 		}
 	}
 
-	return response, err
+	return response, nil
 }
 
-// QueryConfig config returns channel configuration
+// QueryConfig queries for channel configuration.
+//  Parameters:
+//  options hold optional request options
+//
+//  Returns:
+//  channel configuration information
 func (c *Client) QueryConfig(options ...RequestOption) (fab.ChannelCfg, error) {
 
-	opts, err := c.prepareRequestOpts(options...)
+	targets, opts, err := c.prepareRequestParams(options...)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to get opts for QueryConfig")
+		return nil, errors.WithMessage(err, "QueryConfig failed to prepare request parameters")
 	}
-
-	// Determine targets
-	targets, err := c.calculateTargets(opts)
-	if err != nil {
-		return nil, errors.WithMessage(err, "failed to determine target peers for QueryConfig")
-	}
+	reqCtx, cancel := c.createRequestContext(opts)
+	defer cancel()
 
 	channelConfig, err := chconfig.New(c.ctx.ChannelID(), chconfig.WithPeers(targets), chconfig.WithMinResponses(opts.MinTargets))
 	if err != nil {
 		return nil, errors.WithMessage(err, "QueryConfig failed")
 	}
 
-	reqCtx, cancel := c.createRequestContext(&opts)
-	defer cancel()
-
 	return channelConfig.Query(reqCtx)
-
 }
 
 //prepareRequestOpts Reads Opts from Option array
@@ -386,7 +370,7 @@ func (c *Client) calculateTargets(opts requestOptions) ([]fab.Peer, error) {
 	var err error
 	if targets == nil {
 		// Retrieve targets from discovery
-		targets, err = c.ctx.DiscoveryService().GetPeers()
+		targets, err = c.discovery.GetPeers()
 		if err != nil {
 			return nil, err
 		}
@@ -424,14 +408,14 @@ func (c *Client) calculateTargets(opts requestOptions) ([]fab.Peer, error) {
 func (c *Client) createRequestContext(opts *requestOptions) (reqContext.Context, reqContext.CancelFunc) {
 
 	if opts.Timeouts == nil {
-		opts.Timeouts = make(map[core.TimeoutType]time.Duration)
+		opts.Timeouts = make(map[fab.TimeoutType]time.Duration)
 	}
 
-	if opts.Timeouts[core.PeerResponse] == 0 {
-		opts.Timeouts[core.PeerResponse] = c.ctx.Config().TimeoutOrDefault(core.PeerResponse)
+	if opts.Timeouts[fab.PeerResponse] == 0 {
+		opts.Timeouts[fab.PeerResponse] = c.ctx.EndpointConfig().Timeout(fab.PeerResponse)
 	}
 
-	return contextImpl.NewRequest(c.ctx, contextImpl.WithTimeout(opts.Timeouts[core.PeerResponse]), contextImpl.WithParent(opts.ParentContext))
+	return contextImpl.NewRequest(c.ctx, contextImpl.WithTimeout(opts.Timeouts[fab.PeerResponse]), contextImpl.WithParent(opts.ParentContext))
 }
 
 // filterTargets is helper method to filter peers

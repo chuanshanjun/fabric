@@ -30,7 +30,7 @@ func WriteString(w http.ResponseWriter, format string, data []interface{}) {
 	writeContentType(w, plainContentType)
 	if len(data) > 0 {
 		fmt.Fprintf(w, format, data...)
-		return
+	} else {
+		io.WriteString(w, format)
 	}
-	io.WriteString(w, format)
 }

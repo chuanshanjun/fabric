@@ -4,7 +4,15 @@ Copyright SecureKey Technologies Inc. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package channel enables access to a channel on a Fabric network.
+// Package channel enables access to a channel on a Fabric network. A channel client instance provides a handler to interact with peers on specified channel.
+// Channel client can query chaincode, execute chaincode and register/unregister for chaincode events on specific channel.
+// An application that requires interaction with multiple channels should create a separate instance of the channel client for each channel.
+//
+//  Basic Flow:
+//  1) Prepare channel client context
+//  2) Create channel client
+//  3) Execute chaincode
+//  4) Query chaincode
 package channel
 
 import (
@@ -13,18 +21,14 @@ import (
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel/invoke"
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/discovery/greylist"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/filter"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/retry"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/status"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	contextImpl "github.com/hyperledger/fabric-sdk-go/pkg/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/util/errors/multi"
 	"github.com/pkg/errors"
 )
-
-var logger = logging.NewLogger("fabsdk/client")
 
 // Client enables access to a channel on a Fabric network.
 //
@@ -41,7 +45,7 @@ type Client struct {
 // ClientOption describes a functional parameter for the New constructor
 type ClientOption func(*Client) error
 
-// New returns a Client instance.
+// New returns a Client instance. Channel client can query chaincode, execute chaincode and register/unregister for chaincode events on specific channel.
 func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client, error) {
 
 	channelContext, err := channelProvider()
@@ -49,7 +53,7 @@ func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client
 		return nil, errors.WithMessage(err, "failed to create channel context")
 	}
 
-	greylistProvider := greylist.New(channelContext.Config().TimeoutOrDefault(core.DiscoveryGreylistExpiry))
+	greylistProvider := greylist.New(channelContext.EndpointConfig().Timeout(fab.DiscoveryGreylistExpiry))
 
 	if channelContext.ChannelService() == nil {
 		return nil, errors.New("channel service not initialized")
@@ -73,23 +77,72 @@ func New(channelProvider context.ChannelProvider, opts ...ClientOption) (*Client
 	}
 
 	for _, param := range opts {
-		param(&channelClient)
+		err := param(&channelClient)
+		if err != nil {
+			return nil, errors.WithMessage(err, "option failed")
+		}
 	}
 
 	return &channelClient, nil
 }
 
-// Query chaincode using request and optional options provided
+// Query chaincode using request and optional request options
+//  Parameters:
+//  request holds info about mandatory chaincode ID and function
+//  options holds optional request options
+//
+//  Returns:
+//  the proposal responses from peer(s)
 func (cc *Client) Query(request Request, options ...RequestOption) (Response, error) {
-	return cc.InvokeHandler(invoke.NewQueryHandler(), request, cc.addDefaultTimeout(cc.context, core.Query, options...)...)
+
+	options = append(options, addDefaultTimeout(fab.Query))
+	options = append(options, addDefaultTargetFilter(cc.context, filter.ChaincodeQuery))
+
+	return cc.InvokeHandler(invoke.NewQueryHandler(), request, options...)
 }
 
-// Execute prepares and executes transaction using request and optional options provided
+// Execute prepares and executes transaction using request and optional request options
+//  Parameters:
+//  request holds info about mandatory chaincode ID and function
+//  options holds optional request options
+//
+//  Returns:
+//  the proposal responses from peer(s)
 func (cc *Client) Execute(request Request, options ...RequestOption) (Response, error) {
-	return cc.InvokeHandler(invoke.NewExecuteHandler(), request, cc.addDefaultTimeout(cc.context, core.Execute, options...)...)
+	options = append(options, addDefaultTimeout(fab.Execute))
+	options = append(options, addDefaultTargetFilter(cc.context, filter.EndorsingPeer))
+
+	return cc.InvokeHandler(invoke.NewExecuteHandler(), request, options...)
 }
 
-//InvokeHandler invokes handler using request and options provided
+// addDefaultTargetFilter adds default target filter if target filter is not specified
+func addDefaultTargetFilter(chCtx context.Channel, ft filter.EndpointType) RequestOption {
+	return func(ctx context.Client, o *requestOptions) error {
+		if len(o.Targets) == 0 && o.TargetFilter == nil {
+			return WithTargetFilter(filter.NewEndpointFilter(chCtx, ft))(ctx, o)
+		}
+		return nil
+	}
+}
+
+// addDefaultTimeout adds default timeout if timeout is not specified
+func addDefaultTimeout(tt fab.TimeoutType) RequestOption {
+	return func(ctx context.Client, o *requestOptions) error {
+		if o.Timeouts[tt] == 0 {
+			return WithTimeout(tt, ctx.EndpointConfig().Timeout(tt))(ctx, o)
+		}
+		return nil
+	}
+}
+
+// InvokeHandler invokes handler using request and optional request options provided
+//  Parameters:
+//  handler to be invoked
+//  request holds info about mandatory chaincode ID and function
+//  options holds optional request options
+//
+//  Returns:
+//  the proposal responses from peer(s)
 func (cc *Client) InvokeHandler(handler invoke.Handler, request Request, options ...RequestOption) (Response, error) {
 	//Read execute tx options
 	txnOpts, err := cc.prepareOptsFromOptions(cc.context, options...)
@@ -106,15 +159,31 @@ func (cc *Client) InvokeHandler(handler invoke.Handler, request Request, options
 		return Response{}, err
 	}
 
-	complete := make(chan bool)
+	invoker := retry.NewInvoker(
+		requestContext.RetryHandler,
+		retry.WithBeforeRetry(
+			func(err error) {
+				if requestContext.Opts.BeforeRetry != nil {
+					requestContext.Opts.BeforeRetry(err)
+				}
 
+				cc.greylist.Greylist(err)
+
+				// Reset context parameters
+				requestContext.Opts.Targets = txnOpts.Targets
+				requestContext.Error = nil
+				requestContext.Response = invoke.Response{}
+			},
+		),
+	)
+
+	complete := make(chan bool, 1)
 	go func() {
-	handleInvoke:
-		//Perform action through handler
-		handler.Handle(requestContext, clientContext)
-		if cc.resolveRetry(requestContext, txnOpts) {
-			goto handleInvoke
-		}
+		_, _ = invoker.Invoke( // nolint: gas
+			func() (interface{}, error) {
+				handler.Handle(requestContext, clientContext)
+				return nil, requestContext.Error
+			})
 		complete <- true
 	}()
 	select {
@@ -126,40 +195,19 @@ func (cc *Client) InvokeHandler(handler invoke.Handler, request Request, options
 	}
 }
 
-func (cc *Client) resolveRetry(ctx *invoke.RequestContext, o requestOptions) bool {
-	errs, ok := ctx.Error.(multi.Errors)
-	if !ok {
-		errs = append(errs, ctx.Error)
-	}
-	for _, e := range errs {
-		if ctx.RetryHandler.Required(e) {
-			logger.Infof("Retrying on error %s", e)
-			cc.greylist.Greylist(e)
-
-			// Reset context parameters
-			ctx.Opts.Targets = o.Targets
-			ctx.Error = nil
-			ctx.Response = invoke.Response{}
-
-			return true
-		}
-	}
-	return false
-}
-
 //createReqContext creates req context for invoke handler
 func (cc *Client) createReqContext(txnOpts *requestOptions) (reqContext.Context, reqContext.CancelFunc) {
 
 	if txnOpts.Timeouts == nil {
-		txnOpts.Timeouts = make(map[core.TimeoutType]time.Duration)
+		txnOpts.Timeouts = make(map[fab.TimeoutType]time.Duration)
 	}
 
 	//setting default timeouts when not provided
-	if txnOpts.Timeouts[core.Execute] == 0 {
-		txnOpts.Timeouts[core.Execute] = cc.context.Config().TimeoutOrDefault(core.Execute)
+	if txnOpts.Timeouts[fab.Execute] == 0 {
+		txnOpts.Timeouts[fab.Execute] = cc.context.EndpointConfig().Timeout(fab.Execute)
 	}
 
-	reqCtx, cancel := contextImpl.NewRequest(cc.context, contextImpl.WithTimeout(txnOpts.Timeouts[core.Execute]),
+	reqCtx, cancel := contextImpl.NewRequest(cc.context, contextImpl.WithTimeout(txnOpts.Timeouts[fab.Execute]),
 		contextImpl.WithParent(txnOpts.ParentContext))
 	//Add timeout overrides here as a value so that it can be used by immediate child contexts (in handlers/transactors)
 	reqCtx = reqContext.WithValue(reqCtx, contextImpl.ReqContextTimeoutOverrides, txnOpts.Timeouts)
@@ -174,13 +222,19 @@ func (cc *Client) prepareHandlerContexts(reqCtx reqContext.Context, request Requ
 		return nil, nil, errors.New("ChaincodeID and Fcn are required")
 	}
 
-	chConfig, err := cc.context.ChannelService().ChannelConfig()
-	if err != nil {
-		return nil, nil, errors.WithMessage(err, "failed to retrieve channel config")
-	}
-	transactor, err := cc.context.InfraProvider().CreateChannelTransactor(reqCtx, chConfig)
+	transactor, err := cc.context.ChannelService().Transactor(reqCtx)
 	if err != nil {
 		return nil, nil, errors.WithMessage(err, "failed to create transactor")
+	}
+
+	selection, err := cc.context.ChannelService().Selection()
+	if err != nil {
+		return nil, nil, errors.WithMessage(err, "failed to create selection service")
+	}
+
+	discovery, err := cc.context.ChannelService().Discovery()
+	if err != nil {
+		return nil, nil, errors.WithMessage(err, "failed to create discovery service")
 	}
 
 	peerFilter := func(peer fab.Peer) bool {
@@ -194,8 +248,8 @@ func (cc *Client) prepareHandlerContexts(reqCtx reqContext.Context, request Requ
 	}
 
 	clientContext := &invoke.ClientContext{
-		Selection:    cc.context.SelectionService(),
-		Discovery:    cc.context.DiscoveryService(),
+		Selection:    selection,
+		Discovery:    discovery,
 		Membership:   cc.membership,
 		Transactor:   transactor,
 		EventService: cc.eventService,
@@ -225,29 +279,21 @@ func (cc *Client) prepareOptsFromOptions(ctx context.Client, options ...RequestO
 	return txnOpts, nil
 }
 
-//addDefaultTimeout adds given default timeout if it is missing in options
-func (cc *Client) addDefaultTimeout(ctx context.Client, timeOutType core.TimeoutType, options ...RequestOption) []RequestOption {
-	txnOpts := requestOptions{}
-	for _, option := range options {
-		option(ctx, &txnOpts)
-	}
-
-	if txnOpts.Timeouts[timeOutType] == 0 {
-		//InvokeHandler relies on Execute timeout
-		return append(options, WithTimeout(core.Execute, cc.context.Config().TimeoutOrDefault(timeOutType)))
-	}
-	return options
-}
-
-// RegisterChaincodeEvent registers chain code event
-// @param {chan bool} channel which receives event details when the event is complete
-// @returns {object} object handle that should be used to unregister
+// RegisterChaincodeEvent registers for chaincode events. Unregister must be called when the registration is no longer needed.
+//  Parameters:
+//  chaincodeID is the chaincode ID for which events are to be received
+//  eventFilter is the chaincode event filter (regular expression) for which events are to be received
+//
+//  Returns:
+//  the registration and a channel that is used to receive events. The channel is closed when Unregister is called.
 func (cc *Client) RegisterChaincodeEvent(chainCodeID string, eventFilter string) (fab.Registration, <-chan *fab.CCEvent, error) {
 	// Register callback for CE
 	return cc.eventService.RegisterChaincodeEvent(chainCodeID, eventFilter)
 }
 
-// UnregisterChaincodeEvent removes chain code event registration
+// UnregisterChaincodeEvent removes the given registration and closes the event channel.
+//  Parameters:
+//  registration is the registration handle that was returned from RegisterChaincodeEvent method
 func (cc *Client) UnregisterChaincodeEvent(registration fab.Registration) {
 	cc.eventService.Unregister(registration)
 }

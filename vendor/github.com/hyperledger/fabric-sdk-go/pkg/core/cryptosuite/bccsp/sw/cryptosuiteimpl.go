@@ -19,9 +19,9 @@ import (
 var logger = logging.NewLogger("fabsdk/core")
 
 //GetSuiteByConfig returns cryptosuite adaptor for bccsp loaded according to given config
-func GetSuiteByConfig(config core.Config) (core.CryptoSuite, error) {
+func GetSuiteByConfig(config core.CryptoSuiteConfig) (core.CryptoSuite, error) {
 	// TODO: delete this check?
-	if config.SecurityProvider() != "SW" {
+	if config.SecurityProvider() != "sw" {
 		return nil, errors.Errorf("Unsupported BCCSP Provider: %s", config.SecurityProvider())
 	}
 
@@ -57,7 +57,7 @@ func getBCCSPFromOpts(config *bccspSw.SwOpts) (bccsp.BCCSP, error) {
 // GetSuite returns a new instance of the software-based BCCSP
 // set at the passed security level, hash family and KeyStore.
 func GetSuite(securityLevel int, hashFamily string, keyStore bccsp.KeyStore) (core.CryptoSuite, error) {
-	bccsp, err := sw.New(securityLevel, hashFamily, keyStore)
+	bccsp, err := sw.NewWithParams(securityLevel, hashFamily, keyStore)
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +65,13 @@ func GetSuite(securityLevel int, hashFamily string, keyStore bccsp.KeyStore) (co
 }
 
 //GetOptsByConfig Returns Factory opts for given SDK config
-func getOptsByConfig(c core.Config) *bccspSw.SwOpts {
+func getOptsByConfig(c core.CryptoSuiteConfig) *bccspSw.SwOpts {
 	opts := &bccspSw.SwOpts{
 		HashFamily: c.SecurityAlgorithm(),
 		SecLevel:   c.SecurityLevel(),
 		FileKeystore: &bccspSw.FileKeystoreOpts{
 			KeyStorePath: c.KeyStorePath(),
 		},
-		Ephemeral: c.Ephemeral(),
 	}
 	logger.Debug("Initialized SW cryptosuite")
 
@@ -83,7 +82,7 @@ func getEphemeralOpts() *bccspSw.SwOpts {
 	opts := &bccspSw.SwOpts{
 		HashFamily: "SHA2",
 		SecLevel:   256,
-		Ephemeral:  true,
+		Ephemeral:  false,
 	}
 	logger.Debug("Initialized ephemeral SW cryptosuite with default opts")
 

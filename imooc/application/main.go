@@ -20,9 +20,9 @@ func main() {
 	// 定义路由
 	{
 		router.POST("/users", userRegister)
-		router.GET("/users:id", queryUser)
+		router.GET("/users/:id", queryUser)
 		router.DELETE("/users/:id", deleteUser)
-		router.GET("/assets/:id", queryAsset)
+		router.GET("/assets/get/:id", queryAsset)
 		router.POST("/assets/enroll", assetsEnroll)
 		router.POST("/assets/exchange", assetsExchange)
 		router.GET("/assets/exchange/history", assetsExchangeHistory)
@@ -188,7 +188,7 @@ var (
 	sdk *fabsdk.FabricSDK
 	channelName = "assetschannel"
 	chaincodeName = "assets"
-	org = "Org1MSP"
+	org = "org1"
 	user = "Admin"
 	//configPath = "$GOPATH/src/github.com/hyperledger/fabric/imooc/application/config.yaml"
 	configPath = "./config.yaml"
@@ -337,7 +337,7 @@ func channelQuery(fcn string, args [][]byte) (channel.Response, error) {
 	// 实例化一个channel的cli
 	cli, err := channel.New(ctx)
 	if err != nil {
-		panic(err)
+		return channel.Response{}, err
 	}
 
 	// 只是对应状态的查询,select

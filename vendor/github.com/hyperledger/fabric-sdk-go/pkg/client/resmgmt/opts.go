@@ -10,32 +10,40 @@ import (
 	reqContext "context"
 	"time"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/retry"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
-	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fab/comm"
 	"github.com/pkg/errors"
 )
 
 // WithTargets allows overriding of the target peers for the request.
 func WithTargets(targets ...fab.Peer) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
+
+		// Validate targets
+		for _, t := range targets {
+			if t == nil {
+				return errors.New("target is nil")
+			}
+		}
+
 		opts.Targets = targets
 		return nil
 	}
 }
 
-// WithTargetURLs allows overriding of the target peers for the request.
-// Targets are specified by URL, and the SDK will create the underlying peer
+// WithTargetEndpoints allows overriding of the target peers for the request.
+// Targets are specified by name or URL, and the SDK will create the underlying peer
 // objects.
-func WithTargetURLs(urls ...string) RequestOption {
+func WithTargetEndpoints(keys ...string) RequestOption {
 	return func(ctx context.Client, opts *requestOptions) error {
 
 		var targets []fab.Peer
 
-		for _, url := range urls {
+		for _, url := range keys {
 
-			peerCfg, err := config.NetworkPeerConfigFromURL(ctx.Config(), url)
+			peerCfg, err := comm.NetworkPeerConfig(ctx.EndpointConfig(), url)
 			if err != nil {
 				return err
 			}
@@ -62,28 +70,26 @@ func WithTargetFilter(targetFilter fab.TargetFilter) RequestOption {
 
 //WithTimeout encapsulates key value pairs of timeout type, timeout duration to Options
 //if not provided, default timeout configuration from config will be used
-func WithTimeout(timeoutType core.TimeoutType, timeout time.Duration) RequestOption {
+func WithTimeout(timeoutType fab.TimeoutType, timeout time.Duration) RequestOption {
 	return func(ctx context.Client, o *requestOptions) error {
 		if o.Timeouts == nil {
-			o.Timeouts = make(map[core.TimeoutType]time.Duration)
+			o.Timeouts = make(map[fab.TimeoutType]time.Duration)
 		}
 		o.Timeouts[timeoutType] = timeout
 		return nil
 	}
 }
 
-// WithOrdererURL allows an orderer to be specified for the request.
-// The orderer will be looked-up based on the url argument.
-// A default orderer implementation will be used.
-func WithOrdererURL(url string) RequestOption {
+// WithOrdererEndpoint allows an orderer to be specified for the request.
+// The orderer will be looked-up based on the key argument.
+// key argument can be a name or url
+func WithOrdererEndpoint(key string) RequestOption {
+
 	return func(ctx context.Client, opts *requestOptions) error {
 
-		ordererCfg, err := ctx.Config().OrdererConfig(url)
-		if err != nil {
-			return errors.WithMessage(err, "orderer not found")
-		}
-		if ordererCfg == nil {
-			return errors.New("orderer not found")
+		ordererCfg, found := ctx.EndpointConfig().OrdererConfig(key)
+		if !found {
+			return errors.Errorf("orderer not found for url : %s", key)
 		}
 
 		orderer, err := ctx.InfraProvider().CreateOrdererFromConfig(ordererCfg)
@@ -103,10 +109,18 @@ func WithOrderer(orderer fab.Orderer) RequestOption {
 	}
 }
 
-//WithParentContext encapsulates grpc context parent to Options
+//WithParentContext encapsulates grpc parent context.
 func WithParentContext(parentContext reqContext.Context) RequestOption {
 	return func(ctx context.Client, o *requestOptions) error {
 		o.ParentContext = parentContext
+		return nil
+	}
+}
+
+// WithRetry sets retry options.
+func WithRetry(retryOpt retry.Opts) RequestOption {
+	return func(ctx context.Client, o *requestOptions) error {
+		o.Retry = retryOpt
 		return nil
 	}
 }

@@ -18,13 +18,19 @@ import (
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 )
 
+// CCFilter returns true if the given chaincode should be included
+// in the invocation chain when computing endorsers.
+type CCFilter func(ccID string) bool
+
 // Opts allows the user to specify more advanced options
 type Opts struct {
 	Targets       []fab.Peer // targets
 	TargetFilter  fab.TargetFilter
 	Retry         retry.Opts
-	Timeouts      map[core.TimeoutType]time.Duration
+	BeforeRetry   retry.BeforeRetryHandler
+	Timeouts      map[fab.TimeoutType]time.Duration
 	ParentContext reqContext.Context //parent grpc context
+	CCFilter      CCFilter
 }
 
 // Request contains the parameters to execute transaction
@@ -33,15 +39,26 @@ type Request struct {
 	Fcn          string
 	Args         [][]byte
 	TransientMap map[string][]byte
+
+	// InvocationChain contains meta-data that's used by some Selection Service implementations
+	// to choose endorsers that satisfy the endorsement policies of all chaincodes involved
+	// in an invocation chain (i.e. for CC-to-CC invocations).
+	// Each chaincode may also be associated with a set of private data collection names
+	// which are used by some Selection Services (e.g. Fabric Selection) to exclude endorsers
+	// that do NOT have read access to the collections.
+	// The invoked chaincode (specified by ChaincodeID) may optionally be added to the invocation
+	// chain along with any collections, otherwise it may be omitted.
+	InvocationChain []*fab.ChaincodeCall
 }
 
 //Response contains response parameters for query and execute transaction
 type Response struct {
-	Payload          []byte
-	TransactionID    fab.TransactionID
-	TxValidationCode pb.TxValidationCode
 	Proposal         *fab.TransactionProposal
 	Responses        []*fab.TransactionProposalResponse
+	TransactionID    fab.TransactionID
+	TxValidationCode pb.TxValidationCode
+	ChaincodeStatus  int32
+	Payload          []byte
 }
 
 //Handler for chaining transaction executions

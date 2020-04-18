@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package chconfig
 
 import (
-	"crypto/sha256"
 	"time"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
@@ -37,17 +36,8 @@ type cacheKey struct {
 
 // NewCacheKey returns a new CacheKey
 func NewCacheKey(ctx fab.ClientContext, pvdr Provider, channelID string) (CacheKey, error) {
-	identity, err := ctx.Serialize()
-	if err != nil {
-		return nil, err
-	}
-
-	h := sha256.New()
-	h.Write(identity)
-	hash := h.Sum([]byte(channelID))
-
 	return &cacheKey{
-		key:       string(hash),
+		key:       channelID,
 		channelID: channelID,
 		context:   ctx,
 		pvdr:      pvdr,
@@ -60,7 +50,7 @@ func NewRefCache(refresh time.Duration) *lazycache.Cache {
 	initializer := func(key lazycache.Key) (interface{}, error) {
 		ck, ok := key.(CacheKey)
 		if !ok {
-			return nil, errors.New("Unexpected cache key")
+			return nil, errors.New("unexpected cache key")
 		}
 		return NewRef(refresh, ck.Provider(), ck.ChannelID(), ck.Context()), nil
 	}

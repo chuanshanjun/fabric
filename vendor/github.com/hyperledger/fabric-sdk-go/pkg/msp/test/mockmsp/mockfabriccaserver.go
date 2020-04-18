@@ -82,9 +82,13 @@ func (s *MockFabricCAServer) Start(lis net.Listener, cryptoSuite core.CryptoSuit
 	s.cryptoSuite = cryptoSuite
 
 	// Register request handlers
+
 	http.HandleFunc("/register", s.register)
 	http.HandleFunc("/enroll", s.enroll)
 	http.HandleFunc("/reenroll", s.enroll)
+	http.HandleFunc("/revoke", s.revoke)
+	http.HandleFunc("/identities", s.identities)
+	http.HandleFunc("/identities/123", s.identity)
 
 	server := &http.Server{
 		Addr:      addr,
@@ -98,7 +102,7 @@ func (s *MockFabricCAServer) Start(lis net.Listener, cryptoSuite core.CryptoSuit
 		}
 	}()
 	time.Sleep(1 * time.Second)
-	logger.Infof("HTTP Server started on %s", s.address)
+	logger.Debugf("HTTP Server started on %s", s.address)
 
 	s.running = true
 
@@ -112,29 +116,92 @@ func (s *MockFabricCAServer) Running() bool {
 func (s *MockFabricCAServer) addKeyToKeyStore(privateKey []byte) error {
 	// Import private key that matches the cert we will return
 	// from this mock service, so it can be looked up by SKI from the cert
-	_, err := util.ImportBCCSPKeyFromPEMBytes([]byte(privateKey), s.cryptoSuite, false)
-	if err != nil {
-		return err
-	}
-	return nil
+	_, err := util.ImportBCCSPKeyFromPEMBytes(privateKey, s.cryptoSuite, false)
+	return err
 }
 
 // Register user
 func (s *MockFabricCAServer) register(w http.ResponseWriter, req *http.Request) {
 	resp := &api.RegistrationResponseNet{RegistrationResponse: api.RegistrationResponse{Secret: "mockSecretValue"}}
-	cfsslapi.SendResponse(w, resp)
+	if err := cfsslapi.SendResponse(w, resp); err != nil {
+		logger.Error(err)
+	}
+}
+
+// Revoke user
+func (s *MockFabricCAServer) revoke(w http.ResponseWriter, req *http.Request) {
+	resp := &api.RevocationResponse{}
+	if err := cfsslapi.SendResponse(w, resp); err != nil {
+		logger.Error(err)
+	}
 }
 
 // Enroll user
 func (s *MockFabricCAServer) enroll(w http.ResponseWriter, req *http.Request) {
-	s.addKeyToKeyStore([]byte(privateKey))
+	if err := s.addKeyToKeyStore([]byte(privateKey)); err != nil {
+		logger.Error(err)
+	}
 	resp := &enrollmentResponseNet{Cert: util.B64Encode([]byte(ecert))}
 	fillCAInfo(&resp.ServerInfo)
-	cfapi.SendResponse(w, resp)
+	if err := cfapi.SendResponse(w, resp); err != nil {
+		logger.Error(err)
+	}
 }
 
 // Fill the CA info structure appropriately
 func fillCAInfo(info *serverInfoResponseNet) {
 	info.CAName = "MockCAName"
 	info.CAChain = util.B64Encode([]byte("MockCAChain"))
+}
+
+// Register user
+func (s *MockFabricCAServer) identity(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case "GET":
+		// Serve the resource.
+		resp := &api.GetIDResponse{ID: "123", Affiliation: "org2",
+			Attributes: []api.Attribute{{Name: "attName1", Value: "attValue1"}, {Name: "attName2", Value: "attValue2"}}}
+		if err := cfsslapi.SendResponse(w, resp); err != nil {
+			logger.Error(err)
+		}
+	case "PUT":
+		// Update an existing record.
+		resp := &api.IdentityResponse{ID: "123", Affiliation: "org2", Secret: "new-top-secret"}
+		if err := cfsslapi.SendResponse(w, resp); err != nil {
+			logger.Error(err)
+		}
+	case "DELETE":
+		// Remove the record.
+		resp := &api.IdentityResponse{ID: "123"}
+		if err := cfsslapi.SendResponse(w, resp); err != nil {
+			logger.Error(err)
+		}
+	default:
+		// Give an error message
+		logger.Error("Request method not supported ")
+	}
+
+}
+
+// Handler for creating an identity and retrieving all identities
+func (s *MockFabricCAServer) identities(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case "POST":
+		// Create a new record.
+		resp := &api.IdentityResponse{ID: "123", Affiliation: "org2", Secret: "top-secret"}
+		if err := cfsslapi.SendResponse(w, resp); err != nil {
+			logger.Error(err)
+		}
+	case "GET":
+		// Serve the resource.
+		resp := &api.GetAllIDsResponse{Identities: []api.IdentityInfo{{ID: "123", Affiliation: "org2"},
+			{ID: "abc", Affiliation: "org2", Attributes: []api.Attribute{{Name: "attName1", Value: "attValue1"}}}}}
+		if err := cfsslapi.SendResponse(w, resp); err != nil {
+			logger.Error(err)
+		}
+	default:
+		// Give an error message
+		logger.Error("Request method not supported ")
+	}
+
 }

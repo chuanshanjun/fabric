@@ -14,6 +14,7 @@ import (
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fab/events/api"
 	clientdisp "github.com/hyperledger/fabric-sdk-go/pkg/fab/events/client/dispatcher"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fab/events/deliverclient/connection"
 	esdispatcher "github.com/hyperledger/fabric-sdk-go/pkg/fab/events/service/dispatcher"
 	cb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
@@ -24,7 +25,7 @@ var logger = logging.NewLogger("fabsdk/fab")
 
 type dsConnection interface {
 	api.Connection
-	Send(*ab.SeekInfo) error
+	Send(seekInfo *ab.SeekInfo) error
 }
 
 // Dispatcher is responsible for handling all events, including connection and registration events originating from the client,
@@ -36,9 +37,9 @@ type Dispatcher struct {
 }
 
 // New returns a new deliver dispatcher
-func New(context fabcontext.Client, chConfig fab.ChannelCfg, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
+func New(context fabcontext.Client, chConfig fab.ChannelCfg, discoveryService fab.DiscoveryService, connectionProvider api.ConnectionProvider, opts ...options.Opt) *Dispatcher {
 	return &Dispatcher{
-		Dispatcher: *clientdisp.New(context, chConfig, connectionProvider, opts...),
+		Dispatcher: *clientdisp.New(context, chConfig, discoveryService, connectionProvider, opts...),
 	}
 }
 
@@ -59,7 +60,7 @@ func (ed *Dispatcher) handleSeekEvent(e esdispatcher.Event) {
 	evt := e.(*SeekEvent)
 
 	if ed.Connection() == nil {
-		logger.Warnf("Unable to register channel since no connection was established.")
+		logger.Warn("Unable to register channel since no connection was established.")
 		return
 	}
 
@@ -70,15 +71,16 @@ func (ed *Dispatcher) handleSeekEvent(e esdispatcher.Event) {
 	}
 }
 
-func (ed *Dispatcher) handleDeliverResponse(e esdispatcher.Event) {
-	evt := e.(*pb.DeliverResponse)
+func (ed *Dispatcher) handleEvent(e esdispatcher.Event) {
+	delevent := e.(*connection.Event)
+	evt := delevent.Event.(*pb.DeliverResponse)
 	switch response := evt.Type.(type) {
 	case *pb.DeliverResponse_Status:
 		ed.handleDeliverResponseStatus(response)
 	case *pb.DeliverResponse_Block:
-		ed.HandleBlock(response.Block)
+		ed.HandleBlock(response.Block, delevent.SourceURL)
 	case *pb.DeliverResponse_FilteredBlock:
-		ed.HandleFilteredBlock(response.FilteredBlock)
+		ed.HandleFilteredBlock(response.FilteredBlock, delevent.SourceURL)
 	default:
 		logger.Errorf("handler not found for deliver response type %T", response)
 	}
@@ -109,5 +111,5 @@ func (ed *Dispatcher) handleDeliverResponseStatus(evt *pb.DeliverResponse_Status
 
 func (ed *Dispatcher) registerHandlers() {
 	ed.RegisterHandler(&SeekEvent{}, ed.handleSeekEvent)
-	ed.RegisterHandler(&pb.DeliverResponse{}, ed.handleDeliverResponse)
+	ed.RegisterHandler(&connection.Event{}, ed.handleEvent)
 }

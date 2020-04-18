@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric/msp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/common/verifier"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/logging"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
@@ -28,6 +29,7 @@ type identityImpl struct {
 // Context holds the providers
 type Context struct {
 	core.Providers
+	EndpointConfig fab.EndpointConfig
 }
 
 // New member identity
@@ -40,11 +42,17 @@ func New(ctx Context, cfg fab.ChannelCfg) (fab.ChannelMembership, error) {
 }
 
 func (i *identityImpl) Validate(serializedID []byte) error {
-	id, err := i.mspManager.DeserializeIdentity(serializedID)
+	err := areCertDatesValid(serializedID)
 	if err != nil {
+		logger.Errorf("Cert error %s", err)
 		return err
 	}
 
+	id, err := i.mspManager.DeserializeIdentity(serializedID)
+	if err != nil {
+		logger.Errorf("failed to deserialize identity: %s", err)
+		return err
+	}
 	return id.Validate()
 }
 
@@ -55,6 +63,30 @@ func (i *identityImpl) Verify(serializedID []byte, msg []byte, sig []byte) error
 	}
 
 	return id.Verify(msg, sig)
+}
+
+func areCertDatesValid(serializedID []byte) error {
+
+	sID := &mb.SerializedIdentity{}
+	err := proto.Unmarshal(serializedID, sID)
+	if err != nil {
+		return errors.Wrap(err, "could not deserialize a SerializedIdentity")
+	}
+
+	bl, _ := pem.Decode(sID.IdBytes)
+	if bl == nil {
+		return errors.New("could not decode the PEM structure")
+	}
+	cert, err := x509.ParseCertificate(bl.Bytes)
+	if err != nil {
+		return err
+	}
+	err = verifier.ValidateCertificateDates(cert)
+	if err != nil {
+		logger.Warnf("Certificate error '%s' for cert '%v'", err, cert.SerialNumber)
+		return err
+	}
+	return nil
 }
 
 func createMSPManager(ctx Context, cfg fab.ChannelCfg) (msp.MSPManager, error) {
@@ -68,15 +100,13 @@ func createMSPManager(ctx Context, cfg fab.ChannelCfg) (msp.MSPManager, error) {
 		if err := mspManager.Setup(msps); err != nil {
 			return nil, errors.WithMessage(err, "MSPManager Setup failed")
 		}
-
+		var certs [][]byte
 		for _, msp := range msps {
-			for _, cert := range msp.GetTLSRootCerts() {
-				addCertsToConfig(ctx.Config(), cert)
-			}
-
-			for _, cert := range msp.GetTLSIntermediateCerts() {
-				addCertsToConfig(ctx.Config(), cert)
-			}
+			certs = append(certs, msp.GetTLSRootCerts()...)
+			certs = append(certs, msp.GetTLSIntermediateCerts()...)
+		}
+		if len(certs) > 0 {
+			addCertsToConfig(ctx.EndpointConfig, certs)
 		}
 	}
 
@@ -96,29 +126,15 @@ func loadMSPs(mspConfigs []*mb.MSPConfig, cs core.CryptoSuite) ([]msp.MSP, error
 			return nil, errors.Errorf("MSP configuration missing the payload in the 'Config' property")
 		}
 
-		fabricConfig := &mb.FabricMSPConfig{}
-		err := proto.Unmarshal(config.Config, fabricConfig)
+		fabricConfig, err := getFabricConfig(config)
 		if err != nil {
-			return nil, errors.Wrap(err, "unmarshal FabricMSPConfig from config failed")
-		}
-
-		if fabricConfig.Name == "" {
-			return nil, errors.New("MSP Configuration missing name")
-		}
-
-		// with this method we are only dealing with verifying MSPs, not local MSPs. Local MSPs are instantiated
-		// from user enrollment materials (see User class). For verifying MSPs the root certificates are always
-		// required
-		if len(fabricConfig.RootCerts) == 0 {
-			return nil, errors.New("MSP Configuration missing root certificates required for validating signing certificates")
+			return nil, err
 		}
 
 		// get the application org names
-		var orgs []string
 		orgUnits := fabricConfig.OrganizationalUnitIdentifiers
 		for _, orgUnit := range orgUnits {
 			logger.Debugf("loadMSPs - found org of :: %s", orgUnit.OrganizationalUnitIdentifier)
-			orgs = append(orgs, orgUnit.OrganizationalUnitIdentifier)
 		}
 
 		// TODO: Do something with orgs
@@ -132,7 +148,10 @@ func loadMSPs(mspConfigs []*mb.MSPConfig, cs core.CryptoSuite) ([]msp.MSP, error
 			return nil, errors.Wrap(err, "configure MSP failed")
 		}
 
-		mspID, _ := newMSP.GetIdentifier()
+		mspID, err1 := newMSP.GetIdentifier()
+		if err1 != nil {
+			return nil, errors.Wrap(err1, "failed to get identifier")
+		}
 		logger.Debugf("loadMSPs - adding msp=%s", mspID)
 
 		msps = append(msps, newMSP)
@@ -142,22 +161,56 @@ func loadMSPs(mspConfigs []*mb.MSPConfig, cs core.CryptoSuite) ([]msp.MSP, error
 	return msps, nil
 }
 
-//addCertsToConfig adds cert bytes to config TLSCACertPool
-func addCertsToConfig(config core.Config, pemCerts []byte) {
-	for len(pemCerts) > 0 {
-		var block *pem.Block
-		block, pemCerts = pem.Decode(pemCerts)
-		if block == nil {
-			break
-		}
-		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			continue
-		}
+func getFabricConfig(config *mb.MSPConfig) (*mb.FabricMSPConfig, error) {
 
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			continue
+	fabricConfig := &mb.FabricMSPConfig{}
+	err := proto.Unmarshal(config.Config, fabricConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "unmarshal FabricMSPConfig from config failed")
+	}
+
+	if fabricConfig.Name == "" {
+		return nil, errors.New("MSP Configuration missing name")
+	}
+
+	// with this method we are only dealing with verifying MSPs, not local MSPs. Local MSPs are instantiated
+	// from user enrollment materials (see User class). For verifying MSPs the root certificates are always
+	// required
+	if len(fabricConfig.RootCerts) == 0 {
+		return nil, errors.New("MSP Configuration missing root certificates required for validating signing certificates")
+	}
+
+	return fabricConfig, nil
+}
+
+//addCertsToConfig adds cert bytes to config TLSCACertPool
+func addCertsToConfig(config fab.EndpointConfig, pemCertsList [][]byte) {
+	var certs []*x509.Certificate
+	for _, pemCerts := range pemCertsList {
+		for len(pemCerts) > 0 {
+			var block *pem.Block
+			block, pemCerts = pem.Decode(pemCerts)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+				continue
+			}
+
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				continue
+			}
+			err = verifier.ValidateCertificateDates(cert)
+			if err != nil {
+				logger.Warn("%v", err)
+			}
+
+			certs = append(certs, cert)
 		}
-		config.TLSCACertPool(cert)
+	}
+	_, err := config.TLSCACertPool().Get(certs...)
+	if err != nil {
+		logger.Warnf("TLSCACertPool failed %s", err)
 	}
 }

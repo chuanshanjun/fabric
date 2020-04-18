@@ -22,17 +22,24 @@ type Providers interface {
 	fab.Providers
 }
 
+// Local supplies the configuration for a local context client
+type Local interface {
+	Client
+	LocalDiscoveryService() fab.DiscoveryService
+}
+
 // Channel supplies the configuration for channel context client
 type Channel interface {
 	Client
-	DiscoveryService() fab.DiscoveryService
-	SelectionService() fab.SelectionService
 	ChannelService() fab.ChannelService
 	ChannelID() string
 }
 
 // ClientProvider returns client context
 type ClientProvider func() (Client, error)
+
+// LocalProvider returns local client context
+type LocalProvider func() (Local, error)
 
 // ChannelProvider returns channel client context
 type ChannelProvider func() (Channel, error)

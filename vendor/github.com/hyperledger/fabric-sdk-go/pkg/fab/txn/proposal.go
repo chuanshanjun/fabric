@@ -13,10 +13,10 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/multi"
 	contextApi "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
 	"github.com/hyperledger/fabric-sdk-go/pkg/context"
-	"github.com/hyperledger/fabric-sdk-go/pkg/util/errors/multi"
 	"github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/peer"
 	protos_utils "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/utils"
@@ -88,6 +88,12 @@ func SendProposal(reqCtx reqContext.Context, proposal *fab.TransactionProposal, 
 		return nil, errors.New("targets is required")
 	}
 
+	for _, p := range targets {
+		if p == nil {
+			return nil, errors.New("target is nil")
+		}
+	}
+
 	ctx, ok := context.RequestClientContext(reqCtx)
 	if !ok {
 		return nil, errors.New("failed get client context from reqContext for signProposal")
@@ -113,7 +119,7 @@ func SendProposal(reqCtx reqContext.Context, proposal *fab.TransactionProposal, 
 			//resp, err := processor.ProcessTransactionProposal(context.NewRequestOLD(ctx), request)
 			resp, err := processor.ProcessTransactionProposal(reqCtx, request)
 			if err != nil {
-				logger.Debugf("Received error response from txn proposal processing: %v", err)
+				logger.Debugf("Received error response from txn proposal processing: %s", err)
 				responseMtx.Lock()
 				errs = append(errs, err)
 				responseMtx.Unlock()

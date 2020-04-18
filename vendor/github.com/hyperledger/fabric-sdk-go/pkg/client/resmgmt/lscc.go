@@ -18,12 +18,11 @@ import (
 )
 
 const (
-	lscc           = "lscc"
-	lsccDeploy     = "deploy"
-	lsccUpgrade    = "upgrade"
-	lsccChaincodes = "getchaincodes"
-	escc           = "escc"
-	vscc           = "vscc"
+	lscc        = "lscc"
+	lsccDeploy  = "deploy"
+	lsccUpgrade = "upgrade"
+	escc        = "escc"
+	vscc        = "vscc"
 )
 
 // chaincodeProposalType reflects transitions in the chaincode lifecycle
@@ -71,7 +70,6 @@ func createChaincodeDeployProposal(txh fab.TransactionHeader, deploy chaincodePr
 	args = append(args, []byte(vscc))
 
 	if chaincode.CollConfig != nil {
-		var err error
 		collConfigBytes, err := proto.Marshal(&common.CollectionConfigPackage{Config: chaincode.CollConfig})
 		if err != nil {
 			return nil, errors.WithMessage(err, "marshal of collection policy failed")
@@ -87,7 +85,7 @@ func createChaincodeDeployProposal(txh fab.TransactionHeader, deploy chaincodePr
 	case UpgradeChaincode:
 		fcn = lsccUpgrade
 	default:
-		return nil, errors.WithMessage(err, "chaincode deployment type unknown")
+		return nil, errors.New("chaincode deployment type unknown")
 	}
 
 	cir := fab.ChaincodeInvokeRequest{
@@ -95,6 +93,5 @@ func createChaincodeDeployProposal(txh fab.TransactionHeader, deploy chaincodePr
 		Fcn:         fcn,
 		Args:        args,
 	}
-
 	return txn.CreateChaincodeInvokeProposal(txh, cir)
 }
