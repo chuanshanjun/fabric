@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -73,7 +74,8 @@ func queryUser(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	//ctx.JSON(http.StatusOK, resp)
+	ctx.String(http.StatusOK, bytes.NewBuffer(resp.Payload).String())
 }
 
 // 用户销户
@@ -85,7 +87,8 @@ func deleteUser(ctx *gin.Context) {
 	})
 
 	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err)
+		//ctx.AbortWithError(http.StatusInternalServerError, err)
+		ctx.String(http.StatusOK, err.Error())
 		return
 	}
 

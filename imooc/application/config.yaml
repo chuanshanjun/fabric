@@ -26,7 +26,8 @@ client:
   organization: org1
 
   logging:
-    level: debug # 日志级别设置为debug方便调试
+#    level: debug # 日志级别设置为debug方便调试
+    level: info
 
   # Global configuration for peer, event service and orderer timeouts
   # if this this section is omitted, then default values will be used (same values as below)
@@ -149,25 +150,25 @@ channels:
         # Default: true
         eventSource: true
 
-      peer1.org1.imocc.com:
-        # [Optional]. will this peer be sent transaction proposals for endorsement? The peer must
-        # have the chaincode installed. The app can also use this property to decide which peers
-        # to send the chaincode install request. Default: true
-        endorsingPeer: true
-
-        # [Optional]. will this peer be sent query proposals? The peer must have the chaincode
-        # installed. The app can also use this property to decide which peers to send the
-        # chaincode install request. Default: true
-        chaincodeQuery: true
-
-        # [Optional]. will this peer be sent query proposals that do not require chaincodes, like
-        # queryBlock(), queryTransaction(), etc. Default: true
-        ledgerQuery: true
-
-        # [Optional]. will this peer be the target of the SDK's listener registration? All peers can
-        # produce events but the app typically only needs to connect to one to listen to events.
-        # Default: true
-        eventSource: true
+#      peer1.org1.imocc.com:
+#        # [Optional]. will this peer be sent transaction proposals for endorsement? The peer must
+#        # have the chaincode installed. The app can also use this property to decide which peers
+#        # to send the chaincode install request. Default: true
+#        endorsingPeer: true
+#
+#        # [Optional]. will this peer be sent query proposals? The peer must have the chaincode
+#        # installed. The app can also use this property to decide which peers to send the
+#        # chaincode install request. Default: true
+#        chaincodeQuery: true
+#
+#        # [Optional]. will this peer be sent query proposals that do not require chaincodes, like
+#        # queryBlock(), queryTransaction(), etc. Default: true
+#        ledgerQuery: true
+#
+#        # [Optional]. will this peer be the target of the SDK's listener registration? All peers can
+#        # produce events but the app typically only needs to connect to one to listen to events.
+#        # Default: true
+#        eventSource: true
 
     # [Optional]. The application can use these options to perform channel operations like retrieving channel
     # config etc.
@@ -223,7 +224,7 @@ organizations:
     mspID: "OrdererMSP"
 
     # Needed to load users crypto keys and certs for this org (absolute path or relative to global crypto path, DEV mode)
-    cryptoPath: ordererOrganizations/imooc.com/users/{username}@imocc.com/msp
+    cryptoPath: ordererOrganizations/imocc.com/users/{username}@imocc.com/msp
 
 
 #
@@ -252,6 +253,7 @@ orderers:
 
     tlsCACerts:
       # Certificate location absolute path
+#      path: ${GOPATH}/src/github.com//hyperledger/fabric/imooc/deploy/crypto-config/ordererOrganizations/imocc.com/tlsca/tlsca.imocc.com-cert.pem
       path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/ordererOrganizations/example.com/tlsca/tlsca.example.com-cert.pem
 
 #
@@ -280,6 +282,9 @@ peers:
 
     tlsCACerts:
       # Certificate location absolute path
+#      path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
+#      path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
+#      path: ${GOPATH}/src/github.com//hyperledger/fabric/imooc/deploy/crypto-config/peerOrganizations/org1.imocc.com/tlsca/tlsca.org1.imocc.com-cert.pem
       path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
 
 #  peer1.org1.imocc.com:
@@ -302,5 +307,24 @@ peers:
 #
 #    tlsCACerts:
 #      # Certificate location absolute path
-#      path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
+##      path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
+##      path: ${GOPATH}/src/github.com/hyperledger/fabric-sdk-go/${CRYPTOCONFIG_FIXTURES_PATH}/peerOrganizations/org1.example.com/tlsca/tlsca.org1.example.com-cert.pem
+#      path: ${GOPATH}/src/github.com//hyperledger/fabric/imooc/deploy/crypto-config/peerOrganizations/org1.imocc.com/tlsca/tlsca.org1.imocc.com-cert.pem
 
+entityMatchers:
+  orderer:
+    - pattern: (\w+).imocc.(\w+)
+      urlSubstitutionExp: 127.0.0.1:7050
+      mappedHost: orderer.imocc.com
+
+  peer:
+    - pattern: (\w+).org1.imocc.com:(\d+)
+      urlSubstitutionExp: $1.org1.imocc.com:$2
+      sslTargetOverrideUrlSubstitutionExp: $1.org1.imocc.com
+      mappedHost: peer0.org1.example.com
+
+    - pattern: (\w+).org1.imocc.(\w+)
+      urlSubstitutionExp: 127.0.0.1:27051
+      eventUrlSubstitutionExp: 127.0.0.1:27053
+      sslTargetOverrideUrlSubstitutionExp: peer0.org1.imocc.com
+      mappedHost: peer0.org1.imocc.com
