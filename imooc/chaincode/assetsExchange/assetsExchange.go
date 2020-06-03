@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	pb "github.com/hyperledger/fabric/protos/peer"
 )
@@ -21,28 +23,28 @@ const (
 // 而这里为了方便使用json
 type User struct {
 	Name string `json:"name"`
-	Id string  `json:"id"`
+	Id   string `json:"id"`
 	// 在go语言中map是无序的
 	// 所以我们在存储的时候遇到map的顺序不一致，造成最后的序列化结果不一致
 	// 从而在putState的时候,key所对应的结果还不一致
 	// 所以编写链码的时候一定要小心
 	//Assets map[string]string `json:"asserts"`// 资产Id --> 资产Name
-	Assets []string `json:"asserts"`// 在资产中只存储资产的id
+	Assets []string `json:"asserts"` // 在资产中只存储资产的id
 }
 
 // 资产
 type Asset struct {
 	Name string `json:"name"`
-	Id string `json:"id"`
+	Id   string `json:"id"`
 	//Metadata map[string]string `json:"metadata"` // 特殊属性
 	Metadata string `json:"metadata"`
 }
 
 // 资产变更对象
 type AssetHistory struct {
-	AssetId string `json:"asset_id"`
-	OriginOwnerId string `json:"origin_owner_id"` // 资产的原始拥有者
-    CurrentOwnerId string `json:"current_owner_id"` // 资产当前拥有者
+	AssetId        string `json:"asset_id"`
+	OriginOwnerId  string `json:"origin_owner_id"`  // 资产的原始拥有者
+	CurrentOwnerId string `json:"current_owner_id"` // 资产当前拥有者
 }
 
 func constructUserKey(userId string) string {
@@ -80,9 +82,9 @@ func userRegister(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	// 套路4：写入状态
 	// 模拟一个用户开户，序列化，存入到状态中
 	// asset-用户注册的时候是没有钱的，所以给他一个空对象
-	user := &User {
-		Name: name,
-		Id:	id,
+	user := &User{
+		Name:   name,
+		Id:     id,
 		Assets: make([]string, 0),
 	}
 
@@ -98,7 +100,8 @@ func userRegister(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	}
 
 	// 成功返回
-	fmt.Println("user registered")
+	log.Println("user registered!!!")
+	fmt.Println("user registered!!!")
 	return shim.Success(userBytes)
 }
 
@@ -172,9 +175,9 @@ func assetEnroll(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	// 套路4：写入状态
 	// 1. 写入资产对象 2.更新用户对象 3.写入资产变更记录
 	// todo 给对象赋值，但此处使用的是指针类型暂时还不理解
-	asset := &Asset {
-		Name: 	  assetName,
-		Id: 	  assetId,
+	asset := &Asset{
+		Name:     assetName,
+		Id:       assetId,
 		Metadata: metadata,
 	}
 	// 序列化对象
@@ -184,7 +187,7 @@ func assetEnroll(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	}
 	// 写入资产对象
 	if err := stub.PutState(constructAssetKey(assetId), assetBytes); err != nil {
-		 return shim.Error(fmt.Sprintf("save asset error: %s", err))
+		return shim.Error(fmt.Sprintf("save asset error: %s", err))
 	}
 
 	// 反序列化userBytes
@@ -208,8 +211,8 @@ func assetEnroll(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 
 	// 资产变更历史
 	history := &AssetHistory{
-		AssetId: assetId,
-		OriginOwnerId: originOwner,
+		AssetId:        assetId,
+		OriginOwnerId:  originOwner,
 		CurrentOwnerId: ownerId,
 	}
 
@@ -321,8 +324,8 @@ func assetExchange(stub shim.ChaincodeStubInterface, args []string) pb.Response 
 
 	// 插入资产变更记录
 	history := &AssetHistory{
-		AssetId: assetId,
-		OriginOwnerId: ownerId,
+		AssetId:        assetId,
+		OriginOwnerId:  ownerId,
 		CurrentOwnerId: currentOwnerId,
 	}
 	historyBytes, err := json.Marshal(history)

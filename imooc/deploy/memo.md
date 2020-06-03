@@ -7,8 +7,8 @@ export FABRIC_CFG_PATH=$GOPATH/src/github.com/hyperledger/fabric/imooc/deploy
 
 ## 环境清理
 ``` bash
-rm -fr config/*
-rm -fr crypto-config/*
+rm -rf config/*
+rm -rf crypto-config/*
 ```
 
 ## 生成证书文件
